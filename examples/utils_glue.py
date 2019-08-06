@@ -302,7 +302,7 @@ class QnliProcessor(DataProcessor):
     def get_dev_examples(self, data_dir):
         """See base class."""
         return self._create_examples(
-            self._read_tsv(os.path.join(data_dir, "dev.tsv")), 
+            self._read_tsv(os.path.join(data_dir, "dev.tsv")),
             "dev_matched")
 
     def get_labels(self):
@@ -386,6 +386,53 @@ class WnliProcessor(DataProcessor):
             examples.append(
                 InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
         return examples
+
+
+class WeiboProcessor(DataProcessor):
+    def get_train_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_csv(os.path.join(data_dir, "train.csv")), "train")
+
+    def get_dev_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_csv(os.path.join(data_dir, "dev.csv")), "dev")
+
+    def get_test_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_csv(os.path.join(data_dir, "test.csv")), "test")
+
+    def get_labels(self):
+        """See base class."""
+        return [ "-1", "0", "1"]
+
+    def _create_examples(self, lines, set_type):
+        """Creates examples for the training and dev sets."""
+        examples = []
+        for (i, line) in enumerate(lines[1:]):  # skip header
+            guid = "%s-%s" % (set_type, i)
+            if set_type == "test":
+                text_a = line[1]
+                label = "0"
+            else:
+                text_a = line[0]
+                label = line[1]
+            examples.append(
+                InputExample(guid=guid, text_a=text_a, text_b=None, label=label))
+        return examples
+
+    @classmethod
+    def _read_csv(cls, input_file, quotechar='"'):
+        with open(input_file, "r", encoding="utf-8-sig") as f:
+            reader = csv.reader(f, delimiter=",", quotechar=quotechar)
+            lines = []
+            for line in reader:
+                if sys.version_info[0] == 2:
+                    line = list(unicode(cell, 'utf-8') for cell in line)
+                lines.append(line)
+            return lines
 
 
 def convert_examples_to_features(examples, label_list, max_seq_length,
@@ -522,9 +569,9 @@ def simple_accuracy(preds, labels):
     return (preds == labels).mean()
 
 
-def acc_and_f1(preds, labels):
+def acc_and_f1(preds, labels, average='binary'):
     acc = simple_accuracy(preds, labels)
-    f1 = f1_score(y_true=labels, y_pred=preds)
+    f1 = f1_score(y_true=labels, y_pred=preds, average=average)
     return {
         "acc": acc,
         "f1": f1,
@@ -542,18 +589,18 @@ def pearson_and_spearman(preds, labels):
     }
 
 
-def compute_metrics(task_name, preds, labels):
+def compute_metrics(task_name, preds, labels, average='binary'):
     assert len(preds) == len(labels)
     if task_name == "cola":
         return {"mcc": matthews_corrcoef(labels, preds)}
     elif task_name == "sst-2":
         return {"acc": simple_accuracy(preds, labels)}
     elif task_name == "mrpc":
-        return acc_and_f1(preds, labels)
+        return acc_and_f1(preds, labels, average=average)
     elif task_name == "sts-b":
         return pearson_and_spearman(preds, labels)
     elif task_name == "qqp":
-        return acc_and_f1(preds, labels)
+        return acc_and_f1(preds, labels, average=average)
     elif task_name == "mnli":
         return {"acc": simple_accuracy(preds, labels)}
     elif task_name == "mnli-mm":
@@ -564,6 +611,8 @@ def compute_metrics(task_name, preds, labels):
         return {"acc": simple_accuracy(preds, labels)}
     elif task_name == "wnli":
         return {"acc": simple_accuracy(preds, labels)}
+    elif task_name == "weibo":
+        return acc_and_f1(preds, labels, average=average)
     else:
         raise KeyError(task_name)
 
@@ -578,6 +627,7 @@ processors = {
     "qnli": QnliProcessor,
     "rte": RteProcessor,
     "wnli": WnliProcessor,
+    "weibo": WeiboProcessor,
 }
 
 output_modes = {
@@ -591,6 +641,7 @@ output_modes = {
     "qnli": "classification",
     "rte": "classification",
     "wnli": "classification",
+    "weibo": "classification",
 }
 
 GLUE_TASKS_NUM_LABELS = {
@@ -603,4 +654,6 @@ GLUE_TASKS_NUM_LABELS = {
     "qnli": 2,
     "rte": 2,
     "wnli": 2,
+    "weibo": 3,
+
 }
