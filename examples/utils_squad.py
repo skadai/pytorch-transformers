@@ -264,11 +264,12 @@ def read_multi_examples(data_dir, is_training=True, filename='train.json'):
         if os.path.isdir(dirpath):
             data_file = os.path.join(dirpath, data_file_name)
             subtype_en = filename.replace('.', '/').replace('_', ' ')
-            rets = read_ecom_examples(
-                input_file=data_file,
-                is_training=is_training,
-                subtype=subtype_en,
-                start_idx=start_idx)
+            if subtype_en in TRANS_SUBTYPE:
+                rets = read_ecom_examples(
+                    input_file=data_file,
+                    is_training=is_training,
+                    subtype=subtype_en,
+                    start_idx=start_idx)
 
             start_idx = 1 + int(rets[-1].qas_id)
             examples.extend(rets)

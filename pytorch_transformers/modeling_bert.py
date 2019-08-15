@@ -1258,7 +1258,7 @@ class BertForQuestionAnswering(BertPreTrainedModel):
 @add_start_docstrings("""Bert Model with a span classification head on top for extractive question-answering tasks like SQuAD (a linear layers on top of
     the hidden-states output to compute `span start logits` and `span end logits`). """,
                       BERT_START_DOCSTRING, BERT_INPUTS_DOCSTRING)
-class BertForEcomCommentExtraction(BertPreTrainedModel):
+class BertEcomCommentExtraction(BertPreTrainedModel):
     r"""
         **start_positions**: (`optional`) ``torch.LongTensor`` of shape ``(batch_size,)``:
             Labels for position (index) of the start of the labelled span for computing the token classification loss.
@@ -1289,7 +1289,7 @@ class BertForEcomCommentExtraction(BertPreTrainedModel):
         config = BertConfig.from_pretrained('bert-base-uncased')
         tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
 
-        model = BertForQuestionAnswering(config)
+        model = BertEcomCommentExtraction(config)
         input_ids = torch.tensor(tokenizer.encode("Hello, my dog is cute")).unsqueeze(0)  # Batch size 1
         start_positions = torch.tensor([1])
         end_positions = torch.tensor([3])
@@ -1299,7 +1299,7 @@ class BertForEcomCommentExtraction(BertPreTrainedModel):
     """
 
     def __init__(self, config):
-        super(BertForQuestionAnswering, self).__init__(config)
+        super(BertEcomCommentExtraction, self).__init__(config)
         self.num_labels = config.num_labels
 
         self.bert = BertModel(config)
