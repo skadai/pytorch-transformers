@@ -19,6 +19,9 @@
 from __future__ import absolute_import, division, print_function
 
 import json
+import re
+import os
+import random
 import logging
 import math
 import collections
@@ -30,6 +33,36 @@ from pytorch_transformers.tokenization_bert import BasicTokenizer, whitespace_to
 from utils_squad_evaluate import find_all_best_thresh_v2, make_qid_to_has_ans, get_raw_scores
 
 logger = logging.getLogger(__name__)
+
+
+TRANS_SUBTYPE = {'Brand Equity': '品牌资产',
+ 'Loyalty': '品牌忠诚度',
+ 'New User': '品牌新用户',
+ 'WOM': '品牌口碑',
+ 'Fake Concern': '假货',
+ 'Inventory': '库存',
+ 'Expiration Date': '保质期',
+ 'Logistics Speed': '快递送货速度',
+ 'Pick-up Speed': '快递发货速度',
+ 'Wrong Delivery': '快递错发漏发',
+ 'Logistics Fee': '快递费用',
+ 'Logistics Service': '快递服务',
+ 'Logistics Company': '快递公司',
+ 'Logistics Package': '快递包装',
+ 'Logistics Damage': '快递破损',
+ 'Package Cleanliness': '包装清洁度',
+ 'Package Design': '包装设计',
+ 'Package Integrity': '包装完整度',
+ 'Package Material': '包装材质',
+ 'Package Printing': '包装印刷',
+ 'Package General': '包装概览',
+ 'Price Satisfaction': '价格满意度',
+ 'Price Sensitivity': '价格敏感度',
+ 'Promotion': '促销',
+ 'Shop/Customer Service': '店铺或客服服务',
+ 'Return Exchange': '退换货服务'
+}
+
 
 
 class SquadExample(object):
@@ -108,6 +141,35 @@ class InputFeatures(object):
         self.is_impossible = is_impossible
 
 
+def find_positions(text, aspect_terms):
+    if len(aspect_terms) == 0:
+        return (-2, -2)
+    if len(aspect_terms) > 1:
+        #         print(f'drop terms {aspect_terms[1:]}, keep: {aspect_terms[0]}')
+        pass
+    term = aspect_terms[0]
+
+    re_exp = term.strip(' ').replace('  ', ' ').replace(' ', '.{0,20}?')
+
+    ret = [(i.start(), i.end()) for i in re.finditer(re_exp, text)]
+    if len(ret) > 0:
+        return ret[0]
+    else:
+        return (-2, -2)
+
+
+def load_dat(fpath):
+    with open(fpath) as f:
+        dat = []
+        for line in f:
+            try:
+                item = json.loads(line)
+                dat.append(item)
+            except Exception as e:
+                logger.warning('line err:', line, e)
+        return dat
+
+
 def read_squad_examples(input_file, is_training, version_2_with_negative):
     """Read a SQuAD json file into a list of SquadExample."""
     with open(input_file, "r", encoding='utf-8') as reader:
@@ -184,6 +246,93 @@ def read_squad_examples(input_file, is_training, version_2_with_negative):
                     is_impossible=is_impossible)
                 examples.append(example)
     return examples
+
+
+def read_multi_examples(data_dir, is_training=True, filename='train.json'):
+    """
+    读取多个subtype的数据
+    :param data_dir:
+    :param is_training:
+    :param filename:
+    :return:
+    """
+    start_idx = 0
+    examples = []
+    data_file_name = filename
+    for filename in os.listdir(data_dir):
+        dirpath = os.path.join(data_dir, filename)
+        if os.path.isdir(dirpath):
+            data_file = os.path.join(dirpath, data_file_name)
+            subtype_en = filename.replace('.', '/').replace('_', ' ')
+            rets = read_ecom_examples(
+                input_file=data_file,
+                is_training=is_training,
+                subtype=subtype_en,
+                start_idx=start_idx)
+
+            start_idx = 1 + int(rets[-1].qas_id)
+            examples.extend(rets)
+
+    logger.info(f'共读取examples {len(examples)}')
+    return random.sample(examples, len(examples))
+
+
+def read_ecom_examples(input_file, is_training, subtype, start_idx = 0):
+    """Read a ecom json file into a list of SquadExample."""
+    def is_whitespace(c):
+        if c == " " or c == "\t" or c == "\r" or c == "\n" or ord(c) == 0x202F:
+            return True
+        return False
+
+    examples = []
+    input_data = load_dat(input_file)
+    target_subtype = subtype.replace('_', ' ').replace('.', '/')
+    for idx, entry in enumerate(input_data):
+        doc_tokens = entry['text']
+        for op in entry['opinions']:
+            if op['aspectSubtype'] == target_subtype:
+                aspect_terms = op['aspectTerm']
+                if is_training:
+                    start, end = find_positions(doc_tokens, aspect_terms)
+                    if start != -2:
+                        orig_answer_text = doc_tokens[start:end]
+                        example = SquadExample(
+                            qas_id=str(start_idx + idx),
+                            question_text=TRANS_SUBTYPE[op['aspectSubtype']],
+                            doc_tokens=doc_tokens,
+                            orig_answer_text=orig_answer_text,
+                            start_position=start,
+                            end_position=end - 1,
+                            is_impossible=False)
+                        examples.append(example)
+                else:
+                    example = SquadExample(
+                        qas_id=str(start_idx + idx),
+                        question_text=TRANS_SUBTYPE[op['aspectSubtype']],
+                        doc_tokens=doc_tokens,  # 分词的结果
+                        orig_answer_text='',  # 原始答案
+                        start_position=-100,  # 这里position是单词的位置
+                        end_position=-100,
+                        is_impossible=False)
+                    examples.append(example)
+
+                break
+
+        else:
+            # 如果所有 opinion 都 scan 一遍还是找不到, 那就是一个不可回答的问题
+            example = SquadExample(
+                qas_id=str(start_idx + idx),
+                question_text=TRANS_SUBTYPE[op['aspectSubtype']],
+                doc_tokens=doc_tokens,  # 分词的结果
+                orig_answer_text='',  # 原始答案
+                start_position=-1,  # 这里position是单词的位置
+                end_position=-1,
+                is_impossible=True)
+            examples.append(example)
+
+    logger.info(f'共读取examples {len(examples)}')
+    return examples
+
 
 
 def convert_examples_to_features(examples, tokenizer, max_seq_length,
@@ -606,7 +755,7 @@ def write_predictions(all_examples, all_features, all_results, n_best_size,
                         text="",
                         start_logit=null_start_logit,
                         end_logit=null_end_logit))
-                
+
             # In very rare edge cases we could only have single null prediction.
             # So we just create a nonce prediction in this case to avoid failure.
             if len(nbest)==1:
@@ -771,7 +920,7 @@ def write_predictions_extended(all_examples, all_features, all_results, n_best_s
 
             # XLNet un-tokenizer
             # Let's keep it simple for now and see if we need all this later.
-            # 
+            #
             # tok_start_to_orig_index = feature.tok_start_to_orig_index
             # tok_end_to_orig_index = feature.tok_end_to_orig_index
             # start_orig_pos = tok_start_to_orig_index[pred.start_index]

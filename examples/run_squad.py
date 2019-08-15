@@ -42,7 +42,7 @@ from pytorch_transformers import (WEIGHTS_NAME, BertConfig,
 from pytorch_transformers import AdamW, WarmupLinearSchedule
 
 from utils_squad import (read_squad_examples, convert_examples_to_features,
-                         RawResult, write_predictions,
+                         RawResult, write_predictions, read_multi_examples, read_ecom_examples,
                          RawResultExtended, write_predictions_extended)
 
 # The follwing import is the official SQuAD evaluation script (2.0).
@@ -132,9 +132,9 @@ def train(args, train_dataset, model, tokenizer):
             model.train()
             batch = tuple(t.to(args.device) for t in batch)
             inputs = {'input_ids':       batch[0],
-                      'attention_mask':  batch[1], 
-                      'token_type_ids':  None if args.model_type == 'xlm' else batch[2],  
-                      'start_positions': batch[3], 
+                      'attention_mask':  batch[1],
+                      'token_type_ids':  None if args.model_type == 'xlm' else batch[2],
+                      'start_positions': batch[3],
                       'end_positions':   batch[4]}
             if args.model_type in ['xlnet', 'xlm']:
                 inputs.update({'cls_index': batch[5],
@@ -263,12 +263,12 @@ def evaluate(args, model, tokenizer, prefix=""):
                         output_nbest_file, output_null_log_odds_file, args.verbose_logging,
                         args.version_2_with_negative, args.null_score_diff_threshold)
 
-    # Evaluate with the official SQuAD script
-    evaluate_options = EVAL_OPTS(data_file=args.predict_file,
-                                 pred_file=output_prediction_file,
-                                 na_prob_file=output_null_log_odds_file)
-    results = evaluate_on_squad(evaluate_options)
-    return results
+    # # Evaluate with the official SQuAD script
+    # evaluate_options = EVAL_OPTS(data_file=args.predict_file,
+    #                              pred_file=output_prediction_file,
+    #                              na_prob_file=output_null_log_odds_file)
+    # results = evaluate_on_squad(evaluate_options)
+    # return results
 
 
 def load_and_cache_examples(args, tokenizer, evaluate=False, output_examples=False):
@@ -286,9 +286,19 @@ def load_and_cache_examples(args, tokenizer, evaluate=False, output_examples=Fal
         features = torch.load(cached_features_file)
     else:
         logger.info("Creating features from dataset file at %s", input_file)
-        examples = read_squad_examples(input_file=input_file,
-                                                is_training=not evaluate,
-                                                version_2_with_negative=args.version_2_with_negative)
+        # examples = read_squad_examples(input_file=input_file,
+        #                                         is_training=not evaluate,
+        #                                         version_2_with_negative=args.version_2_with_negative)
+
+        if args.multi_subtype_dir != "":
+            data_name = 'dev.json' if evaluate else 'train.json'
+            examples = read_multi_examples(data_dir=args.multi_subtype_dir,
+                                           is_training=not evaluate,
+                                           filename=data_name)
+        else:
+            examples = read_ecom_examples(input_file=input_file,
+                                          is_training=not evaluate,
+                                          subtype=args.ecom_subtype)
         features = convert_examples_to_features(examples=examples,
                                                 tokenizer=tokenizer,
                                                 max_seq_length=args.max_seq_length,
@@ -349,6 +359,9 @@ def main():
 
     parser.add_argument('--version_2_with_negative', action='store_true',
                         help='If true, the SQuAD examples contain some that do not have an answer.')
+    parser.add_argument('--ecom_subtype', type=str, required=True, help="which ecom subtype your model" )
+    parser.add_argument('--multi_subtype_dir', type=str, default="",
+                        help="data dir, set to train multi-subtype simultaneously." )
     parser.add_argument('--null_score_diff_threshold', type=float, default=0.0,
                         help="If null_score - best_non_null is greater than the threshold predict null.")
 
@@ -521,8 +534,8 @@ def main():
             # Evaluate
             result = evaluate(args, model, tokenizer, prefix=global_step)
 
-            result = dict((k + ('_{}'.format(global_step) if global_step else ''), v) for k, v in result.items())
-            results.update(result)
+            # result = dict((k + ('_{}'.format(global_step) if global_step else ''), v) for k, v in result.items())
+            # results.update(result)
 
     logger.info("Results: {}".format(results))
 

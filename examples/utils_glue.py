@@ -387,6 +387,56 @@ class WnliProcessor(DataProcessor):
                 InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
         return examples
 
+class EcomProcessor(DataProcessor):
+    def get_train_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_csv(os.path.join(data_dir, "train.csv")), "train")
+
+    def get_dev_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_csv(os.path.join(data_dir, "dev.csv")), "dev")
+
+    def get_test_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_csv(os.path.join(data_dir, "test.csv")), "test")
+
+    def get_labels(self):
+        """See base class."""
+        return ["-1", "0", "1"]
+
+
+    def _create_examples(self, lines, set_type):
+        """Creates examples for the training and dev sets."""
+        examples = []
+        for (i, line) in enumerate(lines[1:]):  # skip header
+            guid = "%s-%s" % (set_type, i)
+            if set_type == "test":
+                text_a = line[1]
+                text_b = line[2]
+                label = "0"
+            else:
+                text_a = line[0]
+                text_b = line[1]
+                label = line[2]
+
+            examples.append(
+                InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
+        return examples
+
+    @classmethod
+    def _read_csv(cls, input_file, quotechar='"'):
+        with open(input_file, "r", encoding="utf-8-sig") as f:
+            reader = csv.reader(f, delimiter=",", quotechar=quotechar)
+            lines = []
+            for line in reader:
+                if sys.version_info[0] == 2:
+                    line = list(unicode(cell, 'utf-8') for cell in line)
+                lines.append(line)
+            return lines
+
 
 class WeiboProcessor(DataProcessor):
     def get_train_examples(self, data_dir):
@@ -613,6 +663,8 @@ def compute_metrics(task_name, preds, labels, average='binary'):
         return {"acc": simple_accuracy(preds, labels)}
     elif task_name == "weibo":
         return acc_and_f1(preds, labels, average=average)
+    elif task_name == "ecom":
+        return acc_and_f1(preds, labels, average=average)
     else:
         raise KeyError(task_name)
 
@@ -628,6 +680,7 @@ processors = {
     "rte": RteProcessor,
     "wnli": WnliProcessor,
     "weibo": WeiboProcessor,
+    "ecom": EcomProcessor
 }
 
 output_modes = {
@@ -642,6 +695,7 @@ output_modes = {
     "rte": "classification",
     "wnli": "classification",
     "weibo": "classification",
+    "ecom": "classification"
 }
 
 GLUE_TASKS_NUM_LABELS = {
@@ -655,5 +709,6 @@ GLUE_TASKS_NUM_LABELS = {
     "rte": 2,
     "wnli": 2,
     "weibo": 3,
+    "ecom": 3
 
 }
