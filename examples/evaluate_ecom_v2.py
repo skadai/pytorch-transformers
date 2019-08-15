@@ -298,7 +298,7 @@ def main():
     data_file_path = f'/data/projects/bert_pytorch/ecom_aspect/{OPTS.pred_dir}/dev.json'
     na_prob_file_path = f'/data/projects/bert_pytorch/ecom_aspect_out/{OPTS.pred_dir}/null_odds_.json'
     if OPTS.multi:
-        data_dir = f'/data/projects/bert/ecom_pytorch'
+        data_dir = f'/data/projects/bert_pytorch/ecom_aspect'
         dataset = read_multi_examples(data_dir, is_training=True, filename='dev.json')
     else:
         dataset = read_ecom_examples(data_file_path, is_training=True, subtype=subtype_en)

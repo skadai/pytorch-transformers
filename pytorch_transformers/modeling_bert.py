@@ -1300,7 +1300,7 @@ class BertEcomCommentExtraction(BertPreTrainedModel):
 
     def __init__(self, config):
         super(BertEcomCommentExtraction, self).__init__(config)
-        self.num_labels = config.num_labels
+        self.num_labels = 4
 
         self.bert = BertModel(config)
         self.qa_outputs = nn.Linear(config.hidden_size, config.num_labels)
@@ -1308,17 +1308,20 @@ class BertEcomCommentExtraction(BertPreTrainedModel):
         self.apply(self.init_weights)
 
     def forward(self, input_ids, token_type_ids=None, attention_mask=None, start_positions=None,
-                end_positions=None, position_ids=None, head_mask=None):
+                end_positions=None, op_start_positions=None, op_end_positions=None,
+                position_ids=None, head_mask=None):
         outputs = self.bert(input_ids, position_ids=position_ids, token_type_ids=token_type_ids,
                             attention_mask=attention_mask, head_mask=head_mask)
         sequence_output = outputs[0]
 
         logits = self.qa_outputs(sequence_output)
-        start_logits, end_logits = logits.split(1, dim=-1)
+        start_logits, end_logits, op_start_logits, op_end_logits = logits.split(1, dim=-1)
         start_logits = start_logits.squeeze(-1)
         end_logits = end_logits.squeeze(-1)
+        op_start_logits = op_start_logits.squeeze(-1)
+        op_end_logits = op_end_logits.squeeze(-1)
 
-        outputs = (start_logits, end_logits,) + outputs[2:]
+        outputs = (start_logits, end_logits, op_start_logits, op_end_logits) + outputs[2:]
         if start_positions is not None and end_positions is not None:
             # If we are on multi-GPU, split add a dimension
             if len(start_positions.size()) > 1:
@@ -1326,6 +1329,8 @@ class BertEcomCommentExtraction(BertPreTrainedModel):
             if len(end_positions.size()) > 1:
                 end_positions = end_positions.squeeze(-1)
             # sometimes the start/end positions are outside our model inputs, we ignore these terms
+    
+            # todo what is  ignore index here?
             ignored_index = start_logits.size(1)
             start_positions.clamp_(0, ignored_index)
             end_positions.clamp_(0, ignored_index)
@@ -1333,7 +1338,10 @@ class BertEcomCommentExtraction(BertPreTrainedModel):
             loss_fct = CrossEntropyLoss(ignore_index=ignored_index)
             start_loss = loss_fct(start_logits, start_positions)
             end_loss = loss_fct(end_logits, end_positions)
-            total_loss = (start_loss + end_loss) / 2
+            op_start_loss = loss_fct(op_start_logits, op_start_positions)
+            op_end_loss = loss_fct(op_end_logits, op_end_positions)
+
+            total_loss = (start_loss + end_loss + op_start_loss + op_end_loss) / 2
             outputs = (total_loss,) + outputs
 
         return outputs  # (loss), start_logits, end_logits, (hidden_states), (attentions)
