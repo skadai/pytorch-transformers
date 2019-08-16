@@ -24,14 +24,26 @@ import sys
 
 
 from utils_squad import read_ecom_examples, read_multi_examples
+from utils_squad_op import read_ecom_examples as read_ecom_examples_op
+from utils_squad_op import read_multi_examples as read_multi_examples_op
+
 
 OPTS = None
+
+
+FUNC_LOADER = {
+    'op_multi': read_multi_examples_op,
+    'op_single': read_ecom_examples_op,
+    'multi': read_multi_examples,
+    'single': read_ecom_examples
+}
 
 
 def parse_args():
     parser = argparse.ArgumentParser('Official evaluation script for SQuAD version 2.0.')
     parser.add_argument('pred_dir', metavar='pred_dir', help='Model predictions.')
     parser.add_argument('--data-filename', '-d', metavar='data_filename', help='Input data JSON file.')
+
     parser.add_argument('--out-file', '-o', metavar='eval.json',
                         help='Write accuracy metrics to file (default is stdout).')
     parser.add_argument('--na-prob-file', '-n', metavar='na_prob.json',
@@ -42,6 +54,7 @@ def parse_args():
                         help='Save precision-recall curves to directory.')
     parser.add_argument('--verbose', '-v', action='store_true')
     parser.add_argument('--multi', '-m', action='store_true')
+    parser.add_argument('--with_opinion', '-op', action='store_true', help="opinion term f1 calculation")
     parser.add_argument('--subtype_en', '-s', metavar='subtype_en', help='subtype_en.')
 
     if len(sys.argv) == 1:
@@ -109,13 +122,16 @@ def compute_f1(a_gold, a_pred):
     return f1
 
 
-def get_raw_scores(dataset, preds):
+def get_raw_scores(dataset, preds, with_opinion=False):
     exact_scores = {}
     f1_scores = {}
     for qa in dataset:
         qid = str(qa.qas_id)
         print(qa.doc_tokens.replace(' ',''))
-        gold_answers = [qa.orig_answer_text if normalize_answer(qa.orig_answer_text) else '']
+        if not with_opinion:
+            gold_answers = [qa.orig_answer_text if normalize_answer(qa.orig_answer_text) else '']
+        else:
+            gold_answers = [qa.op_answer_text if normalize_answer(qa.op_answer_text) else '']
         if qid not in preds:
             print('Missing prediction for %s' % qid)
             continue
@@ -292,16 +308,19 @@ def find_all_best_thresh(main_eval, preds, exact_raw, f1_raw, na_probs, qid_to_h
 def main():
     data_filename = OPTS.data_filename if OPTS.data_filename else OPTS.pred_dir
     subtype_en = OPTS.subtype_en if OPTS.subtype_en else data_filename
+    data_dir = f'/data/projects/bert_pytorch/ecom_aspect_bak'
 
-    pred_file_path = f'/data/projects/bert_pytorch/ecom_aspect_out/{OPTS.pred_dir}/predictions_.json'
+    prefix = "op_" if OPTS.with_opinion else ""
+    pred_file_path = f'{data_dir}_out/{OPTS.pred_dir}/{prefix}predictions_.json'
 
-    data_file_path = f'/data/projects/bert_pytorch/ecom_aspect/{OPTS.pred_dir}/dev.json'
-    na_prob_file_path = f'/data/projects/bert_pytorch/ecom_aspect_out/{OPTS.pred_dir}/null_odds_.json'
+    data_file_path = f'{data_dir}/{OPTS.pred_dir}/dev.json'
+    na_prob_file_path = f'{data_dir}_out/{OPTS.pred_dir}/{prefix}null_odds_.json'
     if OPTS.multi:
-        data_dir = f'/data/projects/bert_pytorch/ecom_aspect'
-        dataset = read_multi_examples(data_dir, is_training=True, filename='dev.json')
+        flag = f'{prefix}multi'
+        dataset = FUNC_LOADER[flag](data_dir, is_training=True, filename='dev.json')
     else:
-        dataset = read_ecom_examples(data_file_path, is_training=True, subtype=subtype_en)
+        flag = f'{prefix}single'
+        dataset = FUNC_LOADER[flag](data_file_path, is_training=True, subtype=subtype_en)
 
     with open(pred_file_path) as f:
         preds = json.load(f)
@@ -316,7 +335,7 @@ def main():
     has_ans_qids = [k for k, v in qid_to_has_ans.items() if v]
     no_ans_qids = [k for k, v in qid_to_has_ans.items() if not v]
 
-    exact_raw, f1_raw = get_raw_scores(dataset, preds)  # 返回的都是字典
+    exact_raw, f1_raw = get_raw_scores(dataset, preds, prefix == 'op_')  # 返回的都是字典
 
 
     exact_thresh = apply_no_ans_threshold(exact_raw, na_probs, qid_to_has_ans,

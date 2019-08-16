@@ -4,8 +4,8 @@
 SUBTYPE=$1
 
 export GLUE_DIR=/data/projects/bert_pytorch/
-export CUDA_VISIBLE_DEVICES=1
-export TASK_NAME=ecom_aspect
+export CUDA_VISIBLE_DEVICES=0
+export TASK_NAME=ecom_aspect_bak
 export SQUAD_DIR=$GLUE_DIR/${TASK_NAME}/$SUBTYPE
 
 
@@ -21,13 +21,13 @@ python ../examples/run_squad_op.py \
     --train_file $SQUAD_DIR/train.json \
     --predict_file $SQUAD_DIR/dev.json \
     --learning_rate 2e-5 \
-    --num_train_epochs 1 \
+    --num_train_epochs 2 \
     --max_seq_length 256 \
     --save_steps 200 \
     --doc_stride 128 \
     --output_dir $GLUE_DIR/${TASK_NAME}_out/$SUBTYPE \
-    --per_gpu_eval_batch_size=16   \
-    --per_gpu_train_batch_size=8   \
+    --per_gpu_eval_batch_size=32   \
+    --per_gpu_train_batch_size=16   \
     --version_2_with_negative \
     --overwrite_output_dir \
     --overwrite_cache
