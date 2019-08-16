@@ -9,12 +9,13 @@ export TASK_NAME=ecom_aspect
 export SQUAD_DIR=$GLUE_DIR/${TASK_NAME}/$SUBTYPE
 
 
-python ../examples/run_squad.py \
+python ../examples/run_squad_op.py \
     --model_type bert \
     --model_name_or_path $GLUE_DIR/pytorch_model.bin \
     --config_name $GLUE_DIR/config.json \
     --tokenizer_name  $GLUE_DIR/vocab.txt \
     --do_train \
+    --do_eval \
     --do_lower_case \
     --ecom_subtype $SUBTYPE  \
     --train_file $SQUAD_DIR/train.json \
@@ -30,3 +31,4 @@ python ../examples/run_squad.py \
     --version_2_with_negative \
     --overwrite_output_dir \
     --overwrite_cache
+

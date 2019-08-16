@@ -33,7 +33,7 @@ from tqdm import tqdm, trange
 from tensorboardX import SummaryWriter
 
 from pytorch_transformers import (WEIGHTS_NAME, BertConfig,
-                                  BertForQuestionAnswering, BertTokenizer,
+                                  BertForQuestionAnswering, BertEcomCommentExtraction, BertTokenizer,
                                   XLMConfig, XLMForQuestionAnswering,
                                   XLMTokenizer, XLNetConfig,
                                   XLNetForQuestionAnswering,
@@ -41,7 +41,7 @@ from pytorch_transformers import (WEIGHTS_NAME, BertConfig,
 
 from pytorch_transformers import AdamW, WarmupLinearSchedule
 
-from utils_squad import (read_squad_examples, convert_examples_to_features,
+from utils_squad_op import (read_squad_examples, convert_examples_to_features,
                          RawResult, write_predictions, read_multi_examples, read_ecom_examples,
                          RawResultExtended, write_predictions_extended)
 
@@ -56,7 +56,7 @@ ALL_MODELS = sum((tuple(conf.pretrained_config_archive_map.keys()) \
                   for conf in (BertConfig, XLNetConfig, XLMConfig)), ())
 
 MODEL_CLASSES = {
-    'bert': (BertConfig, BertForQuestionAnswering, BertTokenizer),
+    'bert': (BertConfig, BertEcomCommentExtraction, BertTokenizer),
     'xlnet': (XLNetConfig, XLNetForQuestionAnswering, XLNetTokenizer),
     'xlm': (XLMConfig, XLMForQuestionAnswering, XLMTokenizer),
 }
@@ -68,8 +68,10 @@ def set_seed(args):
     if args.n_gpu > 0:
         torch.cuda.manual_seed_all(args.seed)
 
+
 def to_list(tensor):
     return tensor.detach().cpu().tolist()
+
 
 def train(args, train_dataset, model, tokenizer):
     """ Train the model """
@@ -164,6 +166,7 @@ def train(args, train_dataset, model, tokenizer):
                 model.zero_grad()
                 global_step += 1
 
+
                 if args.local_rank in [-1, 0] and args.logging_steps > 0 and global_step % args.logging_steps == 0:
                     # Log metrics
                     if args.local_rank == -1 and args.evaluate_during_training:  # Only evaluate when single GPU otherwise metrics may not average well
@@ -213,6 +216,7 @@ def evaluate(args, model, tokenizer, prefix=""):
     logger.info("  Num examples = %d", len(dataset))
     logger.info("  Batch size = %d", args.eval_batch_size)
     all_results = []
+    op_all_results = []
     for batch in tqdm(eval_dataloader, desc="Evaluating"):
         model.eval()
         batch = tuple(t.to(args.device) for t in batch)
@@ -239,18 +243,32 @@ def evaluate(args, model, tokenizer, prefix=""):
                                            end_top_index        = to_list(outputs[3][i]),
                                            cls_logits           = to_list(outputs[4][i]))
             else:
-                result = RawResult(unique_id    = unique_id,
+
+                result = RawResult(unique_id = unique_id,
                                    start_logits = to_list(outputs[0][i]),
-                                   end_logits   = to_list(outputs[1][i]))
+                                   end_logits = to_list(outputs[1][i]))
+
+                op_result = RawResult(unique_id = unique_id,
+                                   start_logits = to_list(outputs[2][i]),
+                                   end_logits = to_list(outputs[3][i]))
+
             all_results.append(result)
+            op_all_results.append(op_result)
 
     # Compute predictions
     output_prediction_file = os.path.join(args.output_dir, "predictions_{}.json".format(prefix))
     output_nbest_file = os.path.join(args.output_dir, "nbest_predictions_{}.json".format(prefix))
+    op_output_prediction_file = os.path.join(args.output_dir, "op_predictions_{}.json".format(prefix))
+    op_output_nbest_file = os.path.join(args.output_dir, "op_nbest_predictions_{}.json".format(prefix))
     if args.version_2_with_negative:
         output_null_log_odds_file = os.path.join(args.output_dir, "null_odds_{}.json".format(prefix))
+        op_output_null_log_odds_file = os.path.join(args.output_dir, "op_null_odds_{}.json".format(prefix))
+
     else:
         output_null_log_odds_file = None
+        op_output_null_log_odds_file = None
+
+
 
     if args.model_type in ['xlnet', 'xlm']:
         # XLNet uses a more complex post-processing procedure
@@ -263,6 +281,10 @@ def evaluate(args, model, tokenizer, prefix=""):
         write_predictions(examples, features, all_results, args.n_best_size,
                         args.max_answer_length, args.do_lower_case, output_prediction_file,
                         output_nbest_file, output_null_log_odds_file, args.verbose_logging,
+                        args.version_2_with_negative, args.null_score_diff_threshold)
+        write_predictions(examples, features, op_all_results, args.n_best_size,
+                        args.max_answer_length, args.do_lower_case, op_output_prediction_file,
+                        op_output_nbest_file, op_output_null_log_odds_file, args.verbose_logging,
                         args.version_2_with_negative, args.null_score_diff_threshold)
 
     # # Evaluate with the official SQuAD script
@@ -327,8 +349,11 @@ def load_and_cache_examples(args, tokenizer, evaluate=False, output_examples=Fal
     else:
         all_start_positions = torch.tensor([f.start_position for f in features], dtype=torch.long)
         all_end_positions = torch.tensor([f.end_position for f in features], dtype=torch.long)
+        all_op_start_positions = torch.tensor([f.op_start_position for f in features], dtype=torch.long)
+        all_op_end_positions = torch.tensor([f.op_end_position for f in features], dtype=torch.long)
         dataset = TensorDataset(all_input_ids, all_input_mask, all_segment_ids,
                                 all_start_positions, all_end_positions,
+                                all_op_start_positions, all_op_end_positions,
                                 all_cls_index, all_p_mask)
 
     if output_examples:
@@ -478,9 +503,11 @@ def main():
     args.model_type = args.model_type.lower()
     config_class, model_class, tokenizer_class = MODEL_CLASSES[args.model_type]
     config = config_class.from_pretrained(args.config_name if args.config_name else args.model_name_or_path)
+
+    ## 强制 num_labels = 4
+    config.num_labels = 4
     tokenizer = tokenizer_class.from_pretrained(args.tokenizer_name if args.tokenizer_name else args.model_name_or_path, do_lower_case=args.do_lower_case)
     model = model_class.from_pretrained(args.model_name_or_path, from_tf=bool('.ckpt' in args.model_name_or_path), config=config)
-
     if args.local_rank == 0:
         torch.distributed.barrier()  # Make sure only the first process in distributed training will download model & vocab
 

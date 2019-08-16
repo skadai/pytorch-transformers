@@ -299,7 +299,7 @@ def read_ecom_examples(input_file, is_training, subtype, start_idx = 0):
                         orig_answer_text = doc_tokens[start:end]
                         example = SquadExample(
                             qas_id=str(start_idx + idx),
-                            question_text=TRANS_SUBTYPE[op['aspectSubtype']],
+                            question_text=TRANS_SUBTYPE[target_subtype],
                             doc_tokens=doc_tokens,
                             orig_answer_text=orig_answer_text,
                             start_position=start,
@@ -309,7 +309,7 @@ def read_ecom_examples(input_file, is_training, subtype, start_idx = 0):
                 else:
                     example = SquadExample(
                         qas_id=str(start_idx + idx),
-                        question_text=TRANS_SUBTYPE[op['aspectSubtype']],
+                        question_text=TRANS_SUBTYPE[target_subtype],
                         doc_tokens=doc_tokens,  # 分词的结果
                         orig_answer_text='',  # 原始答案
                         start_position=-100,  # 这里position是单词的位置
@@ -323,7 +323,7 @@ def read_ecom_examples(input_file, is_training, subtype, start_idx = 0):
             # 如果所有 opinion 都 scan 一遍还是找不到, 那就是一个不可回答的问题
             example = SquadExample(
                 qas_id=str(start_idx + idx),
-                question_text=TRANS_SUBTYPE[op['aspectSubtype']],
+                question_text=TRANS_SUBTYPE[target_subtype],
                 doc_tokens=doc_tokens,  # 分词的结果
                 orig_answer_text='',  # 原始答案
                 start_position=-1,  # 这里position是单词的位置

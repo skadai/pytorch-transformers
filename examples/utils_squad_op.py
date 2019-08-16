@@ -90,9 +90,9 @@ class SquadExample(object):
         self.start_position = start_position
         self.end_position = end_position
         self.op_answer_text = op_answer_text
-        self.op_start_position = op_start_postion,
-        self.op_end_position = op_end_postition,
-        self.is_impossible = is_impossible,
+        self.op_start_position = op_start_postion
+        self.op_end_position = op_end_postition
+        self.is_impossible = is_impossible
         self.is_op_impossible = is_op_impossible
 
     def __str__(self):
@@ -112,9 +112,9 @@ class SquadExample(object):
             s += ", op_start_position: %d" % (self.op_start_position)
         if self.op_end_position:
             s += ", op_end_position: %d" % (self.op_end_position)
-        if self.is_impossible:
+        if self.is_impossible is not None:
             s += ", is_impossible: %r" % (self.is_impossible)
-        if self.is_op_impossible:
+        if self.is_op_impossible is not None:
             s += ", is_op_impossible: %r" % (self.is_op_impossible)
         return s
 
@@ -160,11 +160,11 @@ class InputFeatures(object):
         self.is_impossible = is_impossible
         self.is_op_impossible = is_op_impossible
 
+
 def find_positions(text, aspect_terms):
     if len(aspect_terms) == 0:
         return (-2, -2)
     if len(aspect_terms) > 1:
-        #         print(f'drop terms {aspect_terms[1:]}, keep: {aspect_terms[0]}')
         pass
     term = aspect_terms[0]
 
@@ -322,12 +322,12 @@ def read_ecom_examples(input_file, is_training, subtype, start_idx = 0):
                         if op_start != -2:
                             example = SquadExample(
                                 qas_id=str(start_idx + idx),
-                                question_text=TRANS_SUBTYPE[op['aspectSubtype']],
+                                question_text=TRANS_SUBTYPE[target_subtype],
                                 doc_tokens=doc_tokens,
                                 orig_answer_text=orig_answer_text,
                                 op_answer_text=doc_tokens[op_start:op_end],
                                 start_position=start,
-                                end_position=end - 1,
+                                end_position=end-1,
                                 op_start_postion=op_start,
                                 op_end_postition=op_end-1,
                                 is_impossible=False,
@@ -335,21 +335,21 @@ def read_ecom_examples(input_file, is_training, subtype, start_idx = 0):
                         else:
                             example = SquadExample(
                                 qas_id=str(start_idx + idx),
-                                question_text=TRANS_SUBTYPE[op['aspectSubtype']],
+                                question_text=TRANS_SUBTYPE[target_subtype],
                                 doc_tokens=doc_tokens,
                                 orig_answer_text=orig_answer_text,
                                 op_answer_text='',
                                 start_position=start,
                                 end_position=end - 1,
-                                op_start_postion=op_start,
-                                op_end_postition=op_end-1,
+                                op_start_postion=-100,
+                                op_end_postition=-100,
                                 is_impossible=False,
                                 is_op_impossible=True)
                         examples.append(example)
                 else:
                     example = SquadExample(
                         qas_id=str(start_idx + idx),
-                        question_text=TRANS_SUBTYPE[op['aspectSubtype']],
+                        question_text=TRANS_SUBTYPE[target_subtype],
                         doc_tokens=doc_tokens,  # 分词的结果
                         orig_answer_text='',  # 原始答案
                         op_answer_text='',
@@ -367,7 +367,7 @@ def read_ecom_examples(input_file, is_training, subtype, start_idx = 0):
             # 如果所有 opinion 都 scan 一遍还是找不到, 那就是一个不可回答的问题
             example = SquadExample(
                 qas_id=str(start_idx + idx),
-                question_text=TRANS_SUBTYPE[op['aspectSubtype']],
+                question_text=TRANS_SUBTYPE[target_subtype],
                 doc_tokens=doc_tokens,  # 分词的结果
                 orig_answer_text='',  # 原始答案
                 op_answer_text='',
@@ -443,7 +443,7 @@ def convert_examples_to_features(examples, tokenizer, max_seq_length,
 
         if is_training and not example.is_op_impossible:
             tok_op_start_position = orig_to_tok_index[example.op_start_position]
-            if example.end_position < len(example.doc_tokens) - 1:
+            if example.op_end_position < len(example.doc_tokens) - 1:
                 tok_op_end_position = orig_to_tok_index[example.op_end_position + 1] - 1
             else:
                 tok_op_end_position = len(all_doc_tokens) - 1
@@ -586,7 +586,11 @@ def convert_examples_to_features(examples, tokenizer, max_seq_length,
                 start_position = cls_index
                 end_position = cls_index
 
-            if example_index < 20:
+            if is_training and span_is_op_impossible:
+                op_start_position = cls_index
+                op_end_position = cls_index
+
+            if example_index < -1:
                 logger.info("*** Example ***")
                 logger.info("unique_id: %s" % (unique_id))
                 logger.info("example_index: %s" % (example_index))
