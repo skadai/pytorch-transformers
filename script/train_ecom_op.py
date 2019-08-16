@@ -38,7 +38,11 @@ TRANS_SUBTYPE = {'Brand Equity': '品牌资产',
 
 data_dir = '/data/projects/bert_pytorch/ecom_aspect_bak'
 for dirname in os.listdir(data_dir):
-    if dirname in TRANS_SUBTYPE:
+    subtype = dirname.replace('.', '/').replace('_', ' ')
+    if subtype == dirname:
+        continue
+    if subtype in TRANS_SUBTYPE:
+        print(subtype)
         command = f'./run_ecom_op.sh {dirname}'
         print(f'******正在训练 {dirname}')
         os.system(command)
