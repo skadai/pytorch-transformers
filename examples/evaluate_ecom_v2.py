@@ -23,7 +23,7 @@ import string
 import sys
 
 
-from utils_squad import read_ecom_examples, read_multi_examples
+from utils_squad import read_ecom_examples, read_multi_examples, TRANS_SUBTYPE
 from utils_squad_op import read_ecom_examples as read_ecom_examples_op
 from utils_squad_op import read_multi_examples as read_multi_examples_op
 
@@ -63,10 +63,11 @@ def parse_args():
     return parser.parse_args()
 
 
-def make_qid_to_has_ans(dataset):
+def make_qid_to_has_ans(dataset, with_opinion=False, subtype=None):
     qid_to_has_ans = {}
     for example in dataset:
-        qid_to_has_ans[example.qas_id] = not example.is_impossible
+        if example.question_text == subtype:
+            qid_to_has_ans[example.qas_id] =not example.is_op_impossible if with_opinion else not example.is_impossible
     return qid_to_has_ans
 
 
@@ -110,36 +111,46 @@ def compute_f1(a_gold, a_pred):
     if len(gold_toks) == 0 or len(pred_toks) == 0:
         # If either is no-answer, then F1 is 1 if they agree, 0 otherwise
         ret = int(gold_toks == pred_toks)
-        print('f1-no-ans', ret, f'<prediction:{a_pred}>', f'<truth:{a_gold}>')
+        # print('f1-no-ans', ret, f'<prediction:{a_pred}>', f'<truth:{a_gold}>')
         return ret
     if num_same == 0:
-        print('f1', 0, f'<prediction:{a_pred}>', f'<truth:{a_gold}>')
+        # print('f1', 0, f'<prediction:{a_pred}>', f'<truth:{a_gold}>')
         return 0
     precision = 1.0 * num_same / len(pred_toks)
     recall = 1.0 * num_same / len(gold_toks)
     f1 = (2 * precision * recall) / (precision + recall)
-    print('f1', f1, f'<prediction:{a_pred}>', f'<truth:{a_gold}>')
+    # print('f1', f1, f'<prediction:{a_pred}>', f'<truth:{a_gold}>')
     return f1
 
 
-def get_raw_scores(dataset, preds, with_opinion=False):
+def get_raw_scores(dataset, preds, with_opinion=False, subtype=None):
     exact_scores = {}
     f1_scores = {}
+    raw_answers = {}
     for qa in dataset:
         qid = str(qa.qas_id)
-        print(qa.doc_tokens.replace(' ',''))
+        # print(qa.doc_tokens.replace(' ',''))
+        if qa.question_text != subtype:
+            continue
         if not with_opinion:
             gold_answers = [qa.orig_answer_text if normalize_answer(qa.orig_answer_text) else '']
+
         else:
             gold_answers = [qa.op_answer_text if normalize_answer(qa.op_answer_text) else '']
         if qid not in preds:
             print('Missing prediction for %s' % qid)
             continue
         a_pred = preds[qid].replace(' ', '')
+        raw_answers[qid] = {
+            'text': qa.doc_tokens.replace(" ",""),
+            'label': gold_answers[0],
+            'pred': a_pred
+        }
         # Take max over all gold answers
         exact_scores[qid] = max(compute_exact(a, a_pred) for a in gold_answers)
         f1_scores[qid] = max(compute_f1(a, a_pred) for a in gold_answers)
-    return exact_scores, f1_scores
+
+    return exact_scores, f1_scores, raw_answers
 
 
 def apply_no_ans_threshold(scores, na_probs, qid_to_has_ans, na_prob_thresh):
@@ -308,6 +319,7 @@ def find_all_best_thresh(main_eval, preds, exact_raw, f1_raw, na_probs, qid_to_h
 def main():
     data_filename = OPTS.data_filename if OPTS.data_filename else OPTS.pred_dir
     subtype_en = OPTS.subtype_en if OPTS.subtype_en else data_filename
+    subtype_cn = TRANS_SUBTYPE[subtype_en.replace('.', '/').replace('_',' ')]
     data_dir = f'/data/projects/bert_pytorch/ecom_aspect_bak'
 
     prefix = "op_" if OPTS.with_opinion else ""
@@ -329,13 +341,12 @@ def main():
             na_probs = json.load(f)
     else:
         na_probs = {k: 0.0 for k in preds}
-    qid_to_has_ans = make_qid_to_has_ans(dataset)  # maps qid to True/False
-    # print('qid_to_has_ans', qid_to_has_ans['5737a0acc3c5551400e51f48'])
+    qid_to_has_ans = make_qid_to_has_ans(dataset, prefix=='op_', subtype=subtype_cn)  # maps qid to True/False
 
     has_ans_qids = [k for k, v in qid_to_has_ans.items() if v]
     no_ans_qids = [k for k, v in qid_to_has_ans.items() if not v]
 
-    exact_raw, f1_raw = get_raw_scores(dataset, preds, prefix == 'op_')  # 返回的都是字典
+    exact_raw, f1_raw, raw_answers = get_raw_scores(dataset, preds, prefix == 'op_', subtype=subtype_cn)  # 返回的都是字典
 
 
     exact_thresh = apply_no_ans_threshold(exact_raw, na_probs, qid_to_has_ans,
@@ -357,9 +368,13 @@ def main():
                                       qid_to_has_ans, OPTS.out_image_dir)
         histogram_na_prob(na_probs, has_ans_qids, OPTS.out_image_dir, 'hasAns')
         histogram_na_prob(na_probs, no_ans_qids, OPTS.out_image_dir, 'noAns')
+
     if OPTS.out_file:
         with open(OPTS.out_file, 'w') as f:
             json.dump(out_eval, f)
+            f.write('\n')
+            json.dump(raw_answers, f)
+
     else:
         print(json.dumps(out_eval, indent=2))
 
