@@ -290,8 +290,8 @@ def read_multi_examples(data_dir, is_training=True, filename='train.json'):
                     subtype=subtype_en,
                     start_idx=start_idx)
 
-            start_idx = 1 + int(rets[-1].qas_id)
-            examples.extend(rets)
+                start_idx = 1 + int(rets[-1].qas_id)
+                examples.extend(rets)
 
     logger.info(f'共读取examples {len(examples)}')
     return random.sample(examples, len(examples))
