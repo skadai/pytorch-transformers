@@ -5,7 +5,7 @@ SUBTYPE=$1
 
 export GLUE_DIR=/data/projects/bert_pytorch/
 export CUDA_VISIBLE_DEVICES=0
-export TASK_NAME=ecom_aspect_multi
+export TASK_NAME=ecom_aspect_mtl
 export SQUAD_DIR=$GLUE_DIR/${TASK_NAME}/$SUBTYPE
 
 
@@ -21,7 +21,7 @@ python ../examples/run_squad_multi.py \
     --train_file $SQUAD_DIR/train.json \
     --predict_file $SQUAD_DIR/dev.json \
     --learning_rate 2e-5 \
-    --num_train_epochs 1 \
+    --num_train_epochs 2 \
     --max_seq_length 256 \
     --save_steps 1000 \
     --doc_stride 128 \

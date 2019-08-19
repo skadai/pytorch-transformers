@@ -7,13 +7,13 @@ export GLUE_DIR=/data/projects/bert_pytorch/
 export CUDA_VISIBLE_DEVICES=0
 export TASK_NAME=ecom_aspect_multi
 export SQUAD_DIR=$GLUE_DIR/${TASK_NAME}/$SUBTYPE
-
+export MODEL_DIR=$GLUE_DIR/${TASK_NAME}_out/all_in_one
 
 python ../examples/run_squad_multi.py \
     --model_type bert \
-    --model_name_or_path $GLUE_DIR/$TASK_NAME/all_in_one/pytorch_model.bin \
-    --config_name $GLUE_DIR/$TASK_NAME/all_in_one/config.json \
-    --tokenizer_name  $GLUE_DIR/$TASK_NAME/all_in_one/vocab.txt \
+    --model_name_or_path $MODEL_DIR/pytorch_model.bin \
+    --config_name $MODEL_DIR/config.json \
+    --tokenizer_name  $MODEL_DIR/vocab.txt \
     --do_eval \
     --do_lower_case \
     --multi_subtype_dir $GLUE_DIR/${TASK_NAME} \
@@ -30,3 +30,5 @@ python ../examples/run_squad_multi.py \
     --per_gpu_train_batch_size=16   \
     --version_2_with_negative \
     --overwrite_output_dir \
+    --overwrite_cache
+
