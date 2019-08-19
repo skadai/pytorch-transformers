@@ -1403,8 +1403,10 @@ class BertEcomCommentMulti(BertPreTrainedModel):
         self.num_labels = config.num_labels
 
         self.bert = BertModel(config)
-        self.qa_outputs1 = nn.Linear(config.hidden_size, config.num_labels)
-        self.qa_outputs2 = nn.Linear(config.hidden_size, config.num_labels)
+        self.qa_outputs = nn.ModuleList()
+        # 为每个subtype提供专门的全连接预测层
+        for i in range(26):
+            self.qa_outputs.append(nn.Linear(config.hidden_size, config.num_labels))
 
         self.apply(self.init_weights)
 
@@ -1415,11 +1417,9 @@ class BertEcomCommentMulti(BertPreTrainedModel):
                             attention_mask=attention_mask, head_mask=head_mask)
         # outputs:
         sequence_output = outputs[0]
-
-        if question_ids[0].item() == 0:
-            logits = self.qa_outputs1(sequence_output)
-        else:
-            logits = self.qa_outputs2(sequence_output)
+        question_id = question_ids[0].item()
+        output_layor = self.qa_outputs[question_id]
+        logits = output_layor(sequence_output)
 
         start_logits, end_logits, op_start_logits, op_end_logits = logits.split(1, dim=-1)
         start_logits = start_logits.squeeze(-1)

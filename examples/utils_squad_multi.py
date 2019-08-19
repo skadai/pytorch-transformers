@@ -410,7 +410,7 @@ def convert_examples_to_features(examples, tokenizer, max_seq_length,
         #     logger.info('Converting %s/%s pos %s neg %s', example_index, len(examples), cnt_pos, cnt_neg)
 
         # query_tokens = tokenizer.tokenize(example.question_text)
-        query_tokens = tokenizer.tokenize("品牌和快递速度")
+        query_tokens = tokenizer.tokenize("提及维度分析")
 
         if len(query_tokens) > max_query_length:
             query_tokens = query_tokens[0:max_query_length]

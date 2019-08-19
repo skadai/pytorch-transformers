@@ -43,7 +43,7 @@ def parse_args():
     parser = argparse.ArgumentParser('Official evaluation script for SQuAD version 2.0.')
     parser.add_argument('pred_dir', metavar='pred_dir', help='Model predictions.')
     parser.add_argument('--data-filename', '-d', metavar='data_filename', help='Input data JSON file.')
-
+    parser.add_argument('--task-name', '-tn', help='task name')
     parser.add_argument('--out-file', '-o', metavar='eval.json',
                         help='Write accuracy metrics to file (default is stdout).')
     parser.add_argument('--na-prob-file', '-n', metavar='na_prob.json',
@@ -320,7 +320,7 @@ def main():
     data_filename = OPTS.data_filename if OPTS.data_filename else OPTS.pred_dir
     subtype_en = OPTS.subtype_en if OPTS.subtype_en else data_filename
     subtype_cn = TRANS_SUBTYPE[subtype_en.replace('.', '/').replace('_',' ')]
-    data_dir = f'/data/projects/bert_pytorch/ecom_aspect_bak'
+    data_dir = f'/data/projects/bert_pytorch/{OPTS.task_name}'
 
     prefix = "op_" if OPTS.with_opinion else ""
     pred_file_path = f'{data_dir}_out/{OPTS.pred_dir}/{prefix}predictions_.json'
