@@ -1418,6 +1418,22 @@ class BertEcomCommentMulti(BertPreTrainedModel):
         # outputs:
         sequence_output = outputs[0]
         question_id = question_ids[0].item()
+        if question_id == -1:
+            ## 只为多任务预测时使用
+            print('predict all subtypes...')
+            start_logits_list, end_logits_list, op_start_logits_list, op_end_logits_list = [], [], [], []
+            for i in range(26):
+                # 这里考虑矩阵拼接直接处理了
+                output_layor = self.qa_outputs[i]
+                logits = output_layor(sequence_output)
+
+                start_logits, end_logits, op_start_logits, op_end_logits = logits.split(1, dim=-1)
+                start_logits_list.append(start_logits.squeeze(-1))
+                end_logits_list.append(end_logits.squeeze(-1))
+                op_start_logits_list.append(op_start_logits.squeeze(-1))
+                op_end_logits_list.append(op_end_logits.squeeze(-1))
+            return (start_logits_list, end_logits_list, op_start_logits_list, op_end_logits_list) + outputs[2:]
+
         output_layor = self.qa_outputs[question_id]
         logits = output_layor(sequence_output)
 
