@@ -1423,7 +1423,7 @@ class BertEcomCommentMulti(BertPreTrainedModel):
             print('predict all subtypes...')
             start_logits_list, end_logits_list, op_start_logits_list, op_end_logits_list = [], [], [], []
             for i in range(26):
-                # 这里考虑矩阵拼接直接处理了
+                # TOD 这里考虑矩阵拼接直接处理了, 便于GPU batchsize处理
                 output_layor = self.qa_outputs[i]
                 logits = output_layor(sequence_output)
 
@@ -1474,3 +1474,135 @@ class BertEcomCommentMulti(BertPreTrainedModel):
             outputs = (total_loss,) + outputs
 
         return outputs  # (loss), start_logits, end_logits, (hidden_states), (attentions)
+
+
+
+@add_start_docstrings("""Bert Model with a span classification head on top for extractive question-answering tasks like SQuAD (a linear layers on top of
+    the hidden-states output to compute `span start logits` and `span end logits`). """,
+                      BERT_START_DOCSTRING, BERT_INPUTS_DOCSTRING)
+class BertEcomCommentMultiPolar(BertPreTrainedModel):
+    r"""
+        **start_positions**: (`optional`) ``torch.LongTensor`` of shape ``(batch_size,)``:
+            Labels for position (index) of the start of the labelled span for computing the token classification loss.
+            Positions are clamped to the length of the sequence (`sequence_length`).
+            Position outside of the sequence are not taken into account for computing the loss.
+        **end_positions**: (`optional`) ``torch.LongTensor`` of shape ``(batch_size,)``:
+            Labels for position (index) of the end of the labelled span for computing the token classification loss.
+            Positions are clamped to the length of the sequence (`sequence_length`).
+            Position outside of the sequence are not taken into account for computing the loss.
+
+    Outputs: `Tuple` comprising various elements depending on the configuration (config) and inputs:
+        **loss**: (`optional`, returned when ``labels`` is provided) ``torch.FloatTensor`` of shape ``(1,)``:
+            Total span extraction loss is the sum of a Cross-Entropy for the start and end positions.
+        **start_scores**: ``torch.FloatTensor`` of shape ``(batch_size, sequence_length,)``
+            Span-start scores (before SoftMax).
+        **end_scores**: ``torch.FloatTensor`` of shape ``(batch_size, sequence_length,)``
+            Span-end scores (before SoftMax).
+        **hidden_states**: (`optional`, returned when ``config.output_hidden_states=True``)
+            list of ``torch.FloatTensor`` (one for the output of each layer + the output of the embeddings)
+            of shape ``(batch_size, sequence_length, hidden_size)``:
+            Hidden-states of the model at the output of each layer plus the initial embedding outputs.
+        **attentions**: (`optional`, returned when ``config.output_attentions=True``)
+            list of ``torch.FloatTensor`` (one for each layer) of shape ``(batch_size, num_heads, sequence_length, sequence_length)``:
+            Attentions weights after the attention softmax, used to compute the weighted average in the self-attention heads.
+
+    Examples::
+
+        config = BertConfig.from_pretrained('bert-base-uncased')
+        tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+
+        model = BertEcomCommentExtraction(config)
+        input_ids = torch.tensor(tokenizer.encode("Hello, my dog is cute")).unsqueeze(0)  # Batch size 1
+        start_positions = torch.tensor([1])
+        end_positions = torch.tensor([3])
+        outputs = model(input_ids, start_positions=start_positions, end_positions=end_positions)
+        loss, start_scores, end_scores = outputs[:2]
+
+    """
+
+    def __init__(self, config):
+        super(BertEcomCommentMultiPolar, self).__init__(config)
+        self.num_labels = config.num_labels
+
+        self.bert = BertModel(config)
+        self.qa_outputs = nn.ModuleList()
+        self.classifiers = nn.ModuleList()
+
+        # 为每个subtype提供专门的全连接预测层
+        for i in range(26):
+            self.qa_outputs.append(nn.Linear(config.hidden_size, config.num_labels))
+            self.classifiers.append(nn.Linear(256, 4))
+
+        self.apply(self.init_weights)
+
+    def forward(self, input_ids, token_type_ids=None, attention_mask=None, start_positions=None,
+                end_positions=None, op_start_positions=None, op_end_positions=None,
+                position_ids=None, head_mask=None, question_ids=None, labels=None):
+        outputs = self.bert(input_ids, position_ids=position_ids, token_type_ids=token_type_ids,
+                            attention_mask=attention_mask, head_mask=head_mask)
+        # outputs:
+        sequence_output = outputs[0]  # batch * seq_length * hidden_size
+        question_id = question_ids[0].item()
+        if question_id == -1:
+            ## 只为多任务预测时使用
+            print('predict all subtypes...')
+            start_logits_list, end_logits_list, op_start_logits_list, op_end_logits_list = [], [], [], []
+            for i in range(26):
+                # TOD 这里考虑矩阵拼接直接处理了, 便于GPU batchsize处理
+                output_layor = self.qa_outputs[i]
+                logits = output_layor(sequence_output)
+
+                start_logits, end_logits, op_start_logits, op_end_logits = logits.split(1, dim=-1)
+                start_logits_list.append(start_logits.squeeze(-1))
+                end_logits_list.append(end_logits.squeeze(-1))
+                op_start_logits_list.append(op_start_logits.squeeze(-1))
+                op_end_logits_list.append(op_end_logits.squeeze(-1))
+            return (start_logits_list, end_logits_list, op_start_logits_list, op_end_logits_list) + outputs[2:]
+
+        output_layor = self.qa_outputs[question_id]
+        classifier_layor = self.classifiers[question_id]
+        logits = output_layor(sequence_output)  # batch * seq_length * num_labels
+
+        start_logits, end_logits, op_start_logits, op_end_logits = logits.split(1, dim=-1)  # batch * seq_length * 1
+
+        start_logits = start_logits.squeeze(-1)  # batch * seq_length
+        end_logits = end_logits.squeeze(-1)
+        op_start_logits = op_start_logits.squeeze(-1)
+        op_end_logits = op_end_logits.squeeze(-1)
+        average_logits = (start_logits + end_logits) /2  # batch * seq_length
+        class_logits = classifier_layor(average_logits) # batch * num_labels
+
+        # sequence_output, pooled_output, (hidden_states), (attentions)
+        outputs = (start_logits, end_logits, op_start_logits, op_end_logits, class_logits) + outputs[2:]
+        if start_positions is not None and end_positions is not None:
+            # If we are on multi-GPU, split add a dimension
+            if len(start_positions.size()) > 1:
+                start_positions = start_positions.squeeze(-1)
+            if len(end_positions.size()) > 1:
+                end_positions = end_positions.squeeze(-1)
+            if len(op_start_positions.size()) > 1:
+                op_start_positions = op_start_positions.squeeze(-1)
+            if len(op_end_positions.size()) > 1:
+                op_end_positions = op_end_positions.squeeze(-1)
+
+            # sometimes the start/end positions are outside our model inputs, we ignore these terms
+            ignored_index = start_logits.size(1)
+
+            start_positions.clamp_(0, ignored_index)
+            end_positions.clamp_(0, ignored_index)
+            op_start_positions.clamp_(0, ignored_index)
+            op_end_positions.clamp_(0, ignored_index)
+
+            loss_fct = CrossEntropyLoss(ignore_index=ignored_index)
+            start_loss = loss_fct(start_logits, start_positions)
+            end_loss = loss_fct(end_logits, end_positions)
+            op_start_loss = loss_fct(op_start_logits, op_start_positions)
+            op_end_loss = loss_fct(op_end_logits, op_end_positions)
+
+            class_loss_fct = CrossEntropyLoss()
+            class_loss = class_loss_fct(class_logits.view(-1, self.num_labels), labels.view(-1))
+            total_loss = (start_loss + end_loss + op_start_loss + op_end_loss + 4 * class_loss) / 4
+            outputs = (total_loss,) + outputs
+
+        return outputs  # (loss), start_logits, end_logits, (hidden_states), (attentions)
+
