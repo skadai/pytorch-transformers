@@ -391,7 +391,7 @@ def read_ecom_examples(input_file, is_training, subtype, start_idx = 0):
                 op_end_postition=-1,
                 is_impossible=True,
                 is_op_impossible=True,
-                label=-2)
+                label=3)
             examples.append(example)
 
     print(f'共读取examples {len(examples)}')
@@ -743,14 +743,14 @@ RawResult = collections.namedtuple("RawResult",
 
 def write_polar_predictions(all_examples, all_results, output_polar_file):
     logger.info("Writing predictions to: %s" % (output_polar_file))
-    label_map = {i: label for i, label in enumerate([-2, 1, 3, 5])}
+    label_map = {i: label for i, label in enumerate([1, 3, 5])}
     with open(output_polar_file, 'w') as cc:
         for example, result in zip(all_examples, all_results):
             subtype = example.question_text
-            text = example.doc_tokens.replace('  ', '_').replace(' ','').replace('_',' ')
             label = example.label
             pred = label_map[np.argmax(result)]
-            cc.write(f'{text},{subtype},{label},{pred}')
+            poss = str(result)
+            cc.write(f'{subtype},{label},{pred},{poss}')
             cc.write('\n')
 
 

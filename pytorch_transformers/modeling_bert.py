@@ -1523,7 +1523,7 @@ class BertEcomCommentMultiPolar(BertPreTrainedModel):
     def __init__(self, config):
         super(BertEcomCommentMultiPolar, self).__init__(config)
         self.num_labels = config.num_labels
-
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
         self.bert = BertModel(config)
         self.qa_outputs = nn.ModuleList()
         self.classifiers = nn.ModuleList()
@@ -1531,7 +1531,7 @@ class BertEcomCommentMultiPolar(BertPreTrainedModel):
         # 为每个subtype提供专门的全连接预测层
         for i in range(26):
             self.qa_outputs.append(nn.Linear(config.hidden_size, config.num_labels))
-            self.classifiers.append(nn.Linear(256, 4))
+            self.classifiers.append(nn.Linear(config.hidden_size, 3))
 
         self.apply(self.init_weights)
 
@@ -1543,6 +1543,9 @@ class BertEcomCommentMultiPolar(BertPreTrainedModel):
         # outputs:
         sequence_output = outputs[0]  # batch * seq_length * hidden_size
         question_id = question_ids[0].item()
+        pooled_output = outputs[1]
+        pooled_output = self.dropout(pooled_output)
+
         if question_id == -1:
             ## 只为多任务预测时使用
             print('predict all subtypes...')
@@ -1569,8 +1572,8 @@ class BertEcomCommentMultiPolar(BertPreTrainedModel):
         end_logits = end_logits.squeeze(-1)
         op_start_logits = op_start_logits.squeeze(-1)
         op_end_logits = op_end_logits.squeeze(-1)
-        average_logits = (start_logits + end_logits) /2  # batch * seq_length
-        class_logits = classifier_layor(average_logits) # batch * num_labels
+
+        class_logits = classifier_layor(pooled_output)
 
         # sequence_output, pooled_output, (hidden_states), (attentions)
         outputs = (start_logits, end_logits, op_start_logits, op_end_logits, class_logits) + outputs[2:]
@@ -1600,8 +1603,8 @@ class BertEcomCommentMultiPolar(BertPreTrainedModel):
             op_end_loss = loss_fct(op_end_logits, op_end_positions)
 
             class_loss_fct = CrossEntropyLoss()
-            class_loss = class_loss_fct(class_logits.view(-1, self.num_labels), labels.view(-1))
-            total_loss = (start_loss + end_loss + op_start_loss + op_end_loss + 4 * class_loss) / 4
+            class_loss = class_loss_fct(class_logits.view(-1, 3), labels.view(-1))
+            total_loss = (start_loss + end_loss + op_start_loss + op_end_loss) / 4 + class_loss
             outputs = (total_loss,) + outputs
 
         return outputs  # (loss), start_logits, end_logits, (hidden_states), (attentions)

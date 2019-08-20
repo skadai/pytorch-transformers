@@ -286,7 +286,7 @@ def evaluate(args, model, tokenizer, prefix=""):
             all_polar_results.append(polar_result)
 
     # Compute predictions
-    output_polar_file = os.path.join(args.output_dir, "polarity_{}.json".format(prefix))
+    output_polar_file = os.path.join(args.output_dir, "polarity_preds_{}.csv".format(prefix))
     output_prediction_file = os.path.join(args.output_dir, "predictions_{}.json".format(prefix))
     output_nbest_file = os.path.join(args.output_dir, "nbest_predictions_{}.json".format(prefix))
     op_output_prediction_file = os.path.join(args.output_dir, "op_predictions_{}.json".format(prefix))
@@ -366,7 +366,7 @@ def load_and_cache_examples(args, tokenizer, evaluate=False, output_examples=Fal
                                                     doc_stride=args.doc_stride,
                                                     max_query_length=args.max_query_length,
                                                     is_training=not evaluate,
-                                                    label_list=[-2, 1, 3, 5])
+                                                    label_list=[1, 3, 5])
             if args.local_rank in [-1, 0]:
                 logger.info("Saving features into cached file %s", cached_features_file)
                 torch.save(features, cached_features_file)
