@@ -41,9 +41,12 @@ from pytorch_transformers import (WEIGHTS_NAME, BertConfig,
 
 from pytorch_transformers import AdamW, WarmupLinearSchedule
 
+
+from utils_glue import processors
+
 from utils_squad_polar import (read_squad_examples, convert_examples_to_features,
                          RawResult, write_predictions, write_polar_predictions,
-                         read_multi_examples, read_ecom_examples,
+                         read_multi_examples, read_ecom_examples, convert_polar_examples_to_features
                          RawResultExtended, write_predictions_extended, TRANS_SUBTYPE)
 
 # The follwing import is the official SQuAD evaluation script (2.0).
@@ -157,6 +160,7 @@ def train(args, train_dataset_dict, model, tokenizer):
             batch = fetch_batch(train_dataloader_iters, load_counter)
             model.train()
             batch = tuple(t.to(args.device) for t in batch)
+            # TODO 此处需要根据极性/特征 区分batch
             inputs = {'input_ids':       batch[0],
                       'attention_mask':  batch[1],
                       'token_type_ids':  None if args.model_type == 'xlm' else batch[2],
@@ -326,6 +330,64 @@ def evaluate(args, model, tokenizer, prefix=""):
     #                              na_prob_file=output_null_log_odds_file)
     # results = evaluate_on_squad(evaluate_options)
     # return results
+
+
+
+def load_and_cache_polar_examples(args, task, tokenizer, evaluate=False):
+    if args.local_rank not in [-1, 0]:
+        torch.distributed.barrier()  # Make sure only the first process in distributed training process the dataset, and the others will use the cache
+
+    processor = processors[task]()
+    output_mode = 'classification'
+    dataset_dict = {}
+    dirlist = os.listdir(args.multi_subtype_dir) if not evaluate else [args.ecom_subtype]
+    for dirname in dirlist:
+        subtype = dirname.replace('.', '/').replace('_', ' ')
+        if subtype not in TRANS_SUBTYPE:
+            continue
+        # Load data features from cache or dataset file
+
+        cached_features_file = os.path.join(args.data_dir, 'cached_{}_{}_{}_{}'.format(
+            'dev' if evaluate else 'train',
+            list(filter(None, args.model_name_or_path.split('/'))).pop(),
+            str(args.max_seq_length),
+            str(task)))
+        if os.path.exists(cached_features_file):
+            logger.info("Loading features from cached file %s", cached_features_file)
+            features = torch.load(cached_features_file)
+        else:
+            logger.info("Creating features from dataset file at %s", args.data_dir)
+            label_list = [1, 3, 5]
+            examples = processor.get_dev_examples(args.data_dir) if evaluate else processor.get_train_examples(args.data_dir)
+            features = convert_polar_examples_to_features(examples, label_list, args.max_seq_length, tokenizer, output_mode,
+                cls_token_at_end=bool(args.model_type in ['xlnet']),            # xlnet has a cls token at the end
+                cls_token=tokenizer.cls_token,
+                sep_token=tokenizer.sep_token,
+                cls_token_segment_id=2 if args.model_type in ['xlnet'] else 0,
+                pad_on_left=bool(args.model_type in ['xlnet']),                 # pad on the left for xlnet
+                pad_token_segment_id=4 if args.model_type in ['xlnet'] else 0)
+            if args.local_rank in [-1, 0]:
+                logger.info("Saving features into cached file %s", cached_features_file)
+                torch.save(features, cached_features_file)
+
+        if args.local_rank == 0:
+            torch.distributed.barrier()  # Make sure only the first process in distributed training process the dataset, and the others will use the cache
+
+        # Convert to Tensors and build dataset
+        all_input_ids = torch.tensor([f.input_ids for f in features], dtype=torch.long)
+        all_input_mask = torch.tensor([f.input_mask for f in features], dtype=torch.long)
+        all_segment_ids = torch.tensor([f.segment_ids for f in features], dtype=torch.long)
+        all_question_ids = torch.tensor([f.question_id for f in features], dtype=torch.long)
+        if output_mode == "classification":
+            all_label_ids = torch.tensor([f.label_id for f in features], dtype=torch.long)
+        elif output_mode == "regression":
+            all_label_ids = torch.tensor([f.label_id for f in features], dtype=torch.float)
+
+        dataset = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_label_ids, all_question_ids)
+        dataset_dict[features[0].question_id] = dataset
+    return dataset_dict
+
+
 
 
 def load_and_cache_examples(args, tokenizer, evaluate=False, output_examples=False):
@@ -560,6 +622,7 @@ def main():
     # Training
     if args.do_train:
         train_dataset_dict = load_and_cache_examples(args, tokenizer, evaluate=False, output_examples=False)
+        train_dataset_dict.update(load_and_cache_polar_examples(args, 'ecom', tokenizer, evaluate=False))
         global_step, tr_loss = train(args, train_dataset_dict, model, tokenizer)
         logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
