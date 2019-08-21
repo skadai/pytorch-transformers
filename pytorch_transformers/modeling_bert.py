@@ -27,6 +27,7 @@ from io import open
 import torch
 from torch import nn
 from torch.nn import CrossEntropyLoss, MSELoss
+from torch.functional import F
 
 from .modeling_utils import (WEIGHTS_NAME, CONFIG_NAME, PretrainedConfig, PreTrainedModel,
                              prune_linear_layer, add_start_docstrings)
@@ -1416,9 +1417,13 @@ class BertEcomCommentMulti(BertPreTrainedModel):
         outputs = self.bert(input_ids, position_ids=position_ids, token_type_ids=token_type_ids,
                             attention_mask=attention_mask, head_mask=head_mask)
         # outputs:
-        sequence_output = outputs[0]
+        sequence_output = outputs[0]  # batch * seq_length * hidden_size
         question_id = question_ids[0].item()
         if question_id == -1:
+            w = torch.cat([i.weight for i in self.qa_outputs], dim=0)  # hidden_size * (num_labels * 26)
+            b = torch.cat([i.bias for i in self.qa_outputs], dim=0)
+
+            temp = F.linear(sequence_output, w, b)  # batch * seq_length * (num_labels * 26)
             ## 只为多任务预测时使用
             print('predict all subtypes...')
             start_logits_list, end_logits_list, op_start_logits_list, op_end_logits_list = [], [], [], []

@@ -33,7 +33,7 @@ from tqdm import tqdm, trange
 from tensorboardX import SummaryWriter
 
 from pytorch_transformers import (WEIGHTS_NAME, BertConfig,
-                                  BertForQuestionAnswering, BertEcomCommentMultiPolar, BertTokenizer,
+                                  BertEcomCommentMultiPolar, BertTokenizer,
                                   XLMConfig, XLMForQuestionAnswering,
                                   XLMTokenizer, XLNetConfig,
                                   XLNetForQuestionAnswering,
@@ -453,10 +453,8 @@ def load_and_cache_polar_examples(args, task, tokenizer, evaluate=False, label_l
         all_input_mask = torch.tensor([f.input_mask for f in features], dtype=torch.long)
         all_segment_ids = torch.tensor([f.segment_ids for f in features], dtype=torch.long)
         all_question_ids = torch.tensor([f.question_id for f in features], dtype=torch.long)
-        if output_mode == "classification":
-            all_label_ids = torch.tensor([f.label_id for f in features], dtype=torch.long)
-        elif output_mode == "regression":
-            all_label_ids = torch.tensor([f.label_id for f in features], dtype=torch.float)
+        all_label_ids = torch.tensor([f.label_id for f in features], dtype=torch.long)
+
 
         dataset = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_label_ids, all_question_ids)
         dataset_dict[features[0].question_id] = dataset
