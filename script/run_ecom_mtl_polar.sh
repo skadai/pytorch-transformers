@@ -21,7 +21,7 @@ python ../examples/run_squad_polar.py \
     --train_file $SQUAD_DIR/train.json \
     --predict_file $SQUAD_DIR/dev.json \
     --learning_rate 2e-5 \
-    --num_train_epochs 1 \
+    --num_train_epochs 2 \
     --max_seq_length 256 \
     --save_steps 1000 \
     --doc_stride 128 \
@@ -30,4 +30,3 @@ python ../examples/run_squad_polar.py \
     --per_gpu_train_batch_size=16   \
     --version_2_with_negative \
     --overwrite_output_dir \
-    --overwrite_cache

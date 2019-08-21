@@ -42,12 +42,12 @@ from pytorch_transformers import (WEIGHTS_NAME, BertConfig,
 from pytorch_transformers import AdamW, WarmupLinearSchedule
 
 
-from utils_glue import processors
+from utils_glue import processors, compute_metrics
 
 from utils_squad_polar import (read_squad_examples, convert_examples_to_features,
                          RawResult, write_predictions, write_polar_predictions,
-                         read_multi_examples, read_ecom_examples, convert_polar_examples_to_features
-                         RawResultExtended, write_predictions_extended, TRANS_SUBTYPE)
+                         read_multi_examples, read_ecom_examples, convert_polar_examples_to_features,
+                         RawResultExtended, write_predictions_extended, acc_and_f1, TRANS_SUBTYPE)
 
 # The follwing import is the official SQuAD evaluation script (2.0).
 # You can remove it from the dependencies if you are using this script outside of the library
@@ -82,7 +82,7 @@ def fetch_batch(dataloaderiters, loader_counter):
     pick_key = random.choice(valid_key)
     loader_counter[pick_key] -= 1
 
-    return next(dataloaderiters[pick_key])
+    return next(dataloaderiters[pick_key]), pick_key
 
 
 def train(args, train_dataset_dict, model, tokenizer):
@@ -157,19 +157,28 @@ def train(args, train_dataset_dict, model, tokenizer):
 
         for step in epoch_iterator:
             # 从不同的数据集中交替取batch 直到某个数据集完结
-            batch = fetch_batch(train_dataloader_iters, load_counter)
+            batch, pick_key = fetch_batch(train_dataloader_iters, load_counter)
             model.train()
             batch = tuple(t.to(args.device) for t in batch)
-            # TODO 此处需要根据极性/特征 区分batch
-            inputs = {'input_ids':       batch[0],
-                      'attention_mask':  batch[1],
-                      'token_type_ids':  None if args.model_type == 'xlm' else batch[2],
-                      'start_positions': batch[3],
-                      'end_positions':   batch[4],
-                      'op_start_positions': batch[5],
-                      'op_end_positions': batch[6],
-                      'question_ids': batch[7],
-                      'labels': batch[8]}
+            # 此处需要根据极性/特征 区分batch
+            if pick_key < 26:
+                # 特征/情感词发现的训练batch
+                inputs = {'input_ids':       batch[0],
+                          'attention_mask':  batch[1],
+                          'token_type_ids':  None if args.model_type == 'xlm' else batch[2],
+                          'start_positions': batch[3],
+                          'end_positions':   batch[4],
+                          'op_start_positions': batch[5],
+                          'op_end_positions': batch[6],
+                          'question_ids': batch[7],
+                          'labels': batch[8]}
+            else:
+                # 情感极性的训练batch
+                inputs = {'input_ids':       batch[0],
+                          'attention_mask':  batch[1],
+                          'token_type_ids':  None if args.model_type == 'xlm' else batch[2],
+                          'labels': batch[3],
+                          'question_ids': batch[4]}
             if args.model_type in ['xlnet', 'xlm']:
                 inputs.update({'cls_index': batch[5],
                                'p_mask':    batch[6]})
@@ -230,8 +239,74 @@ def train(args, train_dataset_dict, model, tokenizer):
     return global_step, tr_loss / global_step
 
 
+def evaluate_polar(args, model, tokenizer, prefix="",label_list=["1", "3", "5"]):
+    # Loop to handle MNLI double evaluation (matched, mis-matched)
+    eval_task_names = ('ecom', )
+    eval_outputs_dirs = (args.output_dir,)
+
+    results = {}
+    for eval_task, eval_output_dir in zip(eval_task_names, eval_outputs_dirs):
+        eval_dataset = load_and_cache_polar_examples(args, eval_task, tokenizer, evaluate=True, label_list=label_list)
+
+        if not os.path.exists(eval_output_dir) and args.local_rank in [-1, 0]:
+            os.makedirs(eval_output_dir)
+
+        args.eval_batch_size = args.per_gpu_eval_batch_size * max(1, args.n_gpu)
+        # Note that DistributedSampler samples randomly
+        eval_sampler = SequentialSampler(eval_dataset) if args.local_rank == -1 else DistributedSampler(eval_dataset)
+        eval_dataloader = DataLoader(eval_dataset, sampler=eval_sampler, batch_size=args.eval_batch_size)
+
+        # Eval!
+        logger.info("***** Running evaluation {} *****".format(prefix))
+        logger.info("  Num examples = %d", len(eval_dataset))
+        logger.info("  Batch size = %d", args.eval_batch_size)
+        nb_eval_steps = 0
+        preds = None
+        out_label_ids = None
+        for batch in tqdm(eval_dataloader, desc="Evaluating"):
+            model.eval()
+            batch = tuple(t.to(args.device) for t in batch)
+
+            with torch.no_grad():
+                inputs = {'input_ids':      batch[0],
+                          'attention_mask': batch[1],
+                          'token_type_ids': batch[2] if args.model_type in ['bert', 'xlnet'] else None,  # XLM don't use segment_ids
+                          'labels':         batch[3],
+                          'question_ids':   batch[4]}
+                outputs = model(**inputs)
+                logits = outputs[5]
+
+            nb_eval_steps += 1
+            if preds is None:
+                preds = logits.detach().cpu().numpy()
+                out_label_ids = inputs['labels'].detach().cpu().numpy()
+            else:
+                preds = np.append(preds, logits.detach().cpu().numpy(), axis=0)
+                out_label_ids = np.append(out_label_ids, inputs['labels'].detach().cpu().numpy(), axis=0)
+
+        print('pred is', preds)
+        preds = np.argmax(preds, axis=1)
+
+        result = acc_and_f1(preds, out_label_ids)
+        results.update(result)
+
+        output_eval_file = os.path.join(eval_output_dir, "eval_results.txt")
+        with open(output_eval_file, "w") as writer:
+            logger.info("***** Eval results {} *****".format(prefix))
+            for key in sorted(result.keys()):
+                logger.info("  %s = %s", key, str(result[key]))
+                writer.write("%s = %s\n" % (key, str(result[key])))
+
+    return results
+
+
+
+
 def evaluate(args, model, tokenizer, prefix=""):
-    dataset, examples, features = load_and_cache_examples(args, tokenizer, evaluate=True, output_examples=True)
+    dataset, examples, features = load_and_cache_examples(args,
+                                                          tokenizer,
+                                                          evaluate=True,
+                                                          output_examples=True)
 
     if not os.path.exists(args.output_dir) and args.local_rank in [-1, 0]:
         os.makedirs(args.output_dir)
@@ -247,7 +322,7 @@ def evaluate(args, model, tokenizer, prefix=""):
     logger.info("  Batch size = %d", args.eval_batch_size)
     all_results = []
     op_all_results = []
-    all_polar_results = []
+    # all_polar_results = []
     for batch in tqdm(eval_dataloader, desc="Evaluating"):
         model.eval()
         batch = tuple(t.to(args.device) for t in batch)
@@ -283,11 +358,11 @@ def evaluate(args, model, tokenizer, prefix=""):
                 op_result = RawResult(unique_id = unique_id,
                                    start_logits = to_list(outputs[2][i]),
                                    end_logits = to_list(outputs[3][i]))
-                polar_result = to_list(outputs[4][i])
+                # polar_result = to_list(outputs[4][i])
 
             all_results.append(result)
             op_all_results.append(op_result)
-            all_polar_results.append(polar_result)
+            # all_polar_results.append(polar_result)
 
     # Compute predictions
     output_polar_file = os.path.join(args.output_dir, "polarity_preds_{}.csv".format(prefix))
@@ -313,7 +388,8 @@ def evaluate(args, model, tokenizer, prefix=""):
                         model.config.start_n_top, model.config.end_n_top,
                         args.version_2_with_negative, tokenizer, args.verbose_logging)
     else:
-        write_polar_predictions(examples, all_polar_results, output_polar_file)
+        # write_polar_predictions(examples, all_polar_results, output_polar_file, label_list=label_list)
+
         write_predictions(examples, features, all_results, args.n_best_size,
                         args.max_answer_length, args.do_lower_case, output_prediction_file,
                         output_nbest_file, output_null_log_odds_file, args.verbose_logging,
@@ -333,7 +409,7 @@ def evaluate(args, model, tokenizer, prefix=""):
 
 
 
-def load_and_cache_polar_examples(args, task, tokenizer, evaluate=False):
+def load_and_cache_polar_examples(args, task, tokenizer, evaluate=False, label_list=None):
     if args.local_rank not in [-1, 0]:
         torch.distributed.barrier()  # Make sure only the first process in distributed training process the dataset, and the others will use the cache
 
@@ -346,8 +422,8 @@ def load_and_cache_polar_examples(args, task, tokenizer, evaluate=False):
         if subtype not in TRANS_SUBTYPE:
             continue
         # Load data features from cache or dataset file
-
-        cached_features_file = os.path.join(args.data_dir, 'cached_{}_{}_{}_{}'.format(
+        input_dir = os.path.join(args.multi_subtype_dir, dirname)
+        cached_features_file = os.path.join(input_dir, 'cached_{}_{}_{}_{}'.format(
             'dev' if evaluate else 'train',
             list(filter(None, args.model_name_or_path.split('/'))).pop(),
             str(args.max_seq_length),
@@ -356,9 +432,8 @@ def load_and_cache_polar_examples(args, task, tokenizer, evaluate=False):
             logger.info("Loading features from cached file %s", cached_features_file)
             features = torch.load(cached_features_file)
         else:
-            logger.info("Creating features from dataset file at %s", args.data_dir)
-            label_list = [1, 3, 5]
-            examples = processor.get_dev_examples(args.data_dir) if evaluate else processor.get_train_examples(args.data_dir)
+            logger.info("Creating features from dataset file at %s", input_dir)
+            examples = processor.get_dev_examples(input_dir) if evaluate else processor.get_train_examples(input_dir)
             features = convert_polar_examples_to_features(examples, label_list, args.max_seq_length, tokenizer, output_mode,
                 cls_token_at_end=bool(args.model_type in ['xlnet']),            # xlnet has a cls token at the end
                 cls_token=tokenizer.cls_token,
@@ -385,7 +460,10 @@ def load_and_cache_polar_examples(args, task, tokenizer, evaluate=False):
 
         dataset = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_label_ids, all_question_ids)
         dataset_dict[features[0].question_id] = dataset
-    return dataset_dict
+    if evaluate:
+        return dataset
+    else:
+        return dataset_dict
 
 
 
@@ -493,6 +571,8 @@ def main():
     parser.add_argument('--ecom_subtype', type=str, required=True, help="which ecom subtype your model" )
     parser.add_argument('--multi_subtype_dir', type=str, default="",
                         help="data dir, set to train multi-subtype simultaneously." )
+    parser.add_argument("--polar", action='store_true',
+                        help="eval polar")
     parser.add_argument('--null_score_diff_threshold', type=float, default=0.0,
                         help="If null_score - best_non_null is greater than the threshold predict null.")
 
@@ -610,6 +690,7 @@ def main():
 
     ## 强制 num_labels = 4
     config.num_labels = 4
+    label_list = ["1", "3", "5"]
     tokenizer = tokenizer_class.from_pretrained(args.tokenizer_name if args.tokenizer_name else args.model_name_or_path, do_lower_case=args.do_lower_case)
     model = model_class.from_pretrained(args.model_name_or_path, from_tf=bool('.ckpt' in args.model_name_or_path), config=config)
     if args.local_rank == 0:
@@ -622,13 +703,13 @@ def main():
     # Training
     if args.do_train:
         train_dataset_dict = load_and_cache_examples(args, tokenizer, evaluate=False, output_examples=False)
-        train_dataset_dict.update(load_and_cache_polar_examples(args, 'ecom', tokenizer, evaluate=False))
+        train_dataset_dict.update(load_and_cache_polar_examples(args, 'ecom', tokenizer, evaluate=False, label_list=label_list))
         global_step, tr_loss = train(args, train_dataset_dict, model, tokenizer)
         logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
 
     # Save the trained model and the tokenizer
-    if args.local_rank == -1 or torch.distributed.get_rank() == 0:
+    if args.do_train and (args.local_rank == -1 or torch.distributed.get_rank() == 0):
         # Create output directory if needed
         if not os.path.exists(args.output_dir) and args.local_rank in [-1, 0]:
             os.makedirs(args.output_dir)
@@ -666,10 +747,12 @@ def main():
             model.to(args.device)
 
             # Evaluate
-            result = evaluate(args, model, tokenizer, prefix=global_step)
-
-            # result = dict((k + ('_{}'.format(global_step) if global_step else ''), v) for k, v in result.items())
-            # results.update(result)
+            if args.polar:
+                result = evaluate_polar(args, model, tokenizer, prefix=global_step, label_list=label_list)
+                result = dict((k + ('_{}'.format(global_step) if global_step else ''), v) for k, v in result.items())
+                results.update(result)
+            else:
+                result = evaluate(args, model, tokenizer, prefix=global_step)
 
     logger.info("Results: {}".format(results))
 

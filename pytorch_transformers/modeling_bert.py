@@ -1523,15 +1523,17 @@ class BertEcomCommentMultiPolar(BertPreTrainedModel):
     def __init__(self, config):
         super(BertEcomCommentMultiPolar, self).__init__(config)
         self.num_labels = config.num_labels
+        self.num_polars = config.num_polars
+        self.num_tasks = config.num_tasks # 表示模型后端多少个subtype的特征/情感极性预测任务
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         self.bert = BertModel(config)
         self.qa_outputs = nn.ModuleList()
         self.classifiers = nn.ModuleList()
 
         # 为每个subtype提供专门的全连接预测层
-        for i in range(26):
+        for i in range(self.num_tasks):
             self.qa_outputs.append(nn.Linear(config.hidden_size, config.num_labels))
-            self.classifiers.append(nn.Linear(config.hidden_size, 3))
+            self.classifiers.append(nn.Linear(config.hidden_size, self.num_polars))
 
         self.apply(self.init_weights)
 
@@ -1549,10 +1551,12 @@ class BertEcomCommentMultiPolar(BertPreTrainedModel):
         if question_id == -1:
             ## 只为多任务预测时使用
             print('predict all subtypes...')
-            start_logits_list, end_logits_list, op_start_logits_list, op_end_logits_list = [], [], [], []
-            for i in range(26):
+            start_logits_list, end_logits_list, op_start_logits_list, op_end_logits_list, class_logits_list = [], [], [], [], []
+            for i in range(self.num_tasks):
                 # TOD 这里考虑矩阵拼接直接处理了, 便于GPU batchsize处理
                 output_layor = self.qa_outputs[i]
+                classifier_layor = self.classifiers[i]
+                class_logits = classifier_layor(pooled_output)
                 logits = output_layor(sequence_output)
 
                 start_logits, end_logits, op_start_logits, op_end_logits = logits.split(1, dim=-1)
@@ -1560,21 +1564,20 @@ class BertEcomCommentMultiPolar(BertPreTrainedModel):
                 end_logits_list.append(end_logits.squeeze(-1))
                 op_start_logits_list.append(op_start_logits.squeeze(-1))
                 op_end_logits_list.append(op_end_logits.squeeze(-1))
-            return (start_logits_list, end_logits_list, op_start_logits_list, op_end_logits_list) + outputs[2:]
+                op_end_logits_list.append(class_logits)
+            return (start_logits_list, end_logits_list, op_start_logits_list, op_end_logits_list, class_logits_list) + outputs[2:]
 
-        output_layor = self.qa_outputs[question_id]
-        classifier_layor = self.classifiers[question_id]
+        output_layor = self.qa_outputs[question_id % self.num_tasks]
+
         logits = output_layor(sequence_output)  # batch * seq_length * num_labels
-
         start_logits, end_logits, op_start_logits, op_end_logits = logits.split(1, dim=-1)  # batch * seq_length * 1
-
         start_logits = start_logits.squeeze(-1)  # batch * seq_length
         end_logits = end_logits.squeeze(-1)
         op_start_logits = op_start_logits.squeeze(-1)
         op_end_logits = op_end_logits.squeeze(-1)
 
+        classifier_layor = self.classifiers[question_id % self.num_tasks]
         class_logits = classifier_layor(pooled_output)
-
         # sequence_output, pooled_output, (hidden_states), (attentions)
         outputs = (start_logits, end_logits, op_start_logits, op_end_logits, class_logits) + outputs[2:]
         if start_positions is not None and end_positions is not None:
@@ -1602,10 +1605,11 @@ class BertEcomCommentMultiPolar(BertPreTrainedModel):
             op_start_loss = loss_fct(op_start_logits, op_start_positions)
             op_end_loss = loss_fct(op_end_logits, op_end_positions)
 
-            class_loss_fct = CrossEntropyLoss()
-            class_loss = class_loss_fct(class_logits.view(-1, 3), labels.view(-1))
-            total_loss = (start_loss + end_loss + op_start_loss + op_end_loss) / 4 + class_loss
+            total_loss = (start_loss + end_loss + op_start_loss + op_end_loss) / 4
             outputs = (total_loss,) + outputs
-
+        elif labels is not None:
+            class_loss_fct = CrossEntropyLoss()
+            class_loss = class_loss_fct(class_logits.view(-1, self.num_polars), labels.view(-1))
+            outputs = (class_loss,) + outputs
         return outputs  # (loss), start_logits, end_logits, (hidden_states), (attentions)
 

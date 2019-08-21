@@ -16,6 +16,7 @@ python ../examples/run_squad_polar.py \
     --tokenizer_name  $MODEL_DIR/vocab.txt \
     --do_eval \
     --do_lower_case \
+    --polar \
     --multi_subtype_dir $GLUE_DIR/${TASK_NAME} \
     --ecom_subtype $SUBTYPE  \
     --train_file $SQUAD_DIR/train.json \
@@ -30,5 +31,4 @@ python ../examples/run_squad_polar.py \
     --per_gpu_train_batch_size=16   \
     --version_2_with_negative \
     --overwrite_output_dir \
-    --overwrite_cache
 

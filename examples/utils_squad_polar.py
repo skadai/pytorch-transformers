@@ -28,9 +28,10 @@ import collections
 from io import open
 
 import numpy as np
+from sklearn.metrics import precision_recall_fscore_support, f1_score
+
 from pytorch_transformers.tokenization_bert import BasicTokenizer, whitespace_tokenize
 
-from uitls_glue import _truncate_seq_pair
 # Required by XLNet evaluation method to compute optimal threshold (see write_predictions_extended() method)
 from utils_squad_evaluate import find_all_best_thresh_v2, make_qid_to_has_ans, get_raw_scores
 
@@ -125,6 +126,15 @@ class SquadExample(object):
             s += ", label: %r" % (self.label)
         return s
 
+class InputPolarFeatures(object):
+    """A single set of features of data."""
+
+    def __init__(self, input_ids, input_mask, segment_ids, label_id, question_id):
+        self.input_ids = input_ids
+        self.input_mask = input_mask
+        self.segment_ids = segment_ids
+        self.label_id = label_id
+        self.question_id = question_id
 
 class InputFeatures(object):
     """A single set of features of data."""
@@ -170,6 +180,24 @@ class InputFeatures(object):
         self.is_impossible = is_impossible
         self.is_op_impossible = is_op_impossible
         self.label = label
+
+
+
+def _truncate_seq_pair(tokens_a, tokens_b, max_length):
+    """Truncates a sequence pair in place to the maximum length."""
+
+    # This is a simple heuristic which will always truncate the longer sequence
+    # one token at a time. This makes more sense than truncating an equal percent
+    # of tokens from each, since if one sequence is very short then each token
+    # that's truncated likely contains more information than a longer sequence.
+    while True:
+        total_length = len(tokens_a) + len(tokens_b)
+        if total_length <= max_length:
+            break
+        if len(tokens_a) > len(tokens_b):
+            tokens_a.pop()
+        else:
+            tokens_b.pop()
 
 
 def find_positions(text, aspect_terms):
@@ -413,10 +441,10 @@ def convert_polar_examples_to_features(examples, label_list, max_seq_length,
         `cls_token_segment_id` define the segment id associated to the CLS token (0 for BERT, 2 for XLNet)
     """
 
-    label_map = {label : i for i, label in enumerate(label_list)}
+    label_map = {label: i for i, label in enumerate(label_list)}
 
     features = []
-    question_ids = list(TRANS_SUBTYPE.values())
+    question_ids = list(TRANS_SUBTYPE.keys())
     for (ex_index, example) in enumerate(examples):
         if ex_index % 10000 == 0:
             logger.info("Writing example %d of %d" % (ex_index, len(examples)))
@@ -507,7 +535,7 @@ def convert_polar_examples_to_features(examples, label_list, max_seq_length,
             logger.info("label: %s (id = %d)" % (example.label, label_id))
 
         features.append(
-                InputFeatures(input_ids=input_ids,
+                InputPolarFeatures(input_ids=input_ids,
                               input_mask=input_mask,
                               segment_ids=segment_ids,
                               label_id=label_id,
@@ -856,9 +884,9 @@ RawResult = collections.namedtuple("RawResult",
                                    ["unique_id", "start_logits", "end_logits"])
 
 
-def write_polar_predictions(all_examples, all_results, output_polar_file):
+def write_polar_predictions(all_examples, all_results, output_polar_file, label_list):
     logger.info("Writing predictions to: %s" % (output_polar_file))
-    label_map = {i: label for i, label in enumerate([1, 3, 5])}
+    label_map = {i: label for i, label in enumerate(label_list)}
     with open(output_polar_file, 'w') as cc:
         for example, result in zip(all_examples, all_results):
             subtype = example.question_text
@@ -1389,3 +1417,19 @@ def _compute_softmax(scores):
     for score in exp_scores:
         probs.append(score / total_sum)
     return probs
+
+def simple_accuracy(preds, labels):
+    return (preds == labels).mean()
+
+
+def acc_and_f1(preds, labels):
+    acc = simple_accuracy(preds, labels)
+
+    metric = precision_recall_fscore_support(y_true=labels, y_pred=preds)
+    return {
+        "acc": acc,
+        "prec": metric[0].tolist(),
+        "recall": metric[1].tolist(),
+        "f1": metric[2].tolist(),
+        "support": metric[3].tolist()
+    }
