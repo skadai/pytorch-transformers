@@ -238,11 +238,17 @@ def evaluate(args, model, tokenizer, prefix=""):
         results.update(result)
 
         output_eval_file = os.path.join(eval_output_dir, "eval_results.txt")
+        output_eval_raw_file = os.path.join(eval_output_dir, "eval_raw.csv")
         with open(output_eval_file, "w") as writer:
             logger.info("***** Eval results {} *****".format(prefix))
             for key in sorted(result.keys()):
                 logger.info("  %s = %s", key, str(result[key]))
                 writer.write("%s = %s\n" % (key, str(result[key])))
+
+        with open(output_eval_raw_file, "w") as writer:
+            logger.info("***** Eval raw data {} *****".format(prefix))
+            for pred, label in zip(preds, out_label_ids):
+                writer.write(f"{pred}, {label}\n")
 
     return results
 

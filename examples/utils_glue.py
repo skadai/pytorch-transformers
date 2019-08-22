@@ -405,7 +405,7 @@ class EcomProcessor(DataProcessor):
 
     def get_labels(self):
         """See base class."""
-        return ["-1", "0", "1"]
+        return ["1", "3", "5"]
 
 
     def _create_examples(self, lines, set_type):
