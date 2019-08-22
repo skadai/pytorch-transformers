@@ -4,8 +4,8 @@
 SUBTYPE=$1
 
 export GLUE_DIR=/data/projects/bert_pytorch/
-export CUDA_VISIBLE_DEVICES=0
-export TASK_NAME=ecom_aspect_multi
+export CUDA_VISIBLE_DEVICES=1
+export TASK_NAME=ecom_aspect_mtl
 export SQUAD_DIR=$GLUE_DIR/${TASK_NAME}/$SUBTYPE
 export MODEL_DIR=$GLUE_DIR/${TASK_NAME}_out/all_in_one
 
