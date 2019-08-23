@@ -276,15 +276,11 @@ class BertEmbeddings(nn.Module):
 class SubtypeAttention(nn.Module):
     def __init__(self, config):
         super(SubtypeAttention, self).__init__()
-        self.output_attentions = True
+        self.output_attentions = False
         self.num_attention_heads = 1
-        self.attention_head_size = int(config.hidden_size / config.num_attention_heads)
+        self.attention_head_size = int(config.hidden_size / self.num_attention_heads)
         self.all_head_size = self.num_attention_heads * self.attention_head_size
-
-        self.query = nn.Linear(config.hidden_size, self.all_head_size)
-        self.key = nn.Linear(config.hidden_size, self.all_head_size)
-        self.value = nn.Linear(config.hidden_size, self.all_head_size)
-
+        self.activation = nn.Tanh()
         self.dropout = nn.Dropout(config.attention_probs_dropout_prob)
 
     def transpose_for_scores(self, x):
@@ -295,26 +291,37 @@ class SubtypeAttention(nn.Module):
     def forward(self, subtype_states, hidden_states, attention_mask, head_mask=None):
         # hidden_states: batch * seq_len * hidden_size
         # subtype_states: batch * 1 * hiden_size
-        mixed_query_layer = self.query(subtype_states)  # batch * seq_len * head_size
-        mixed_key_layer = self.key(hidden_states)
-        mixed_value_layer = self.value(hidden_states)
+        query_layer = self.transpose_for_scores(subtype_states)
+        key_layer = self.transpose_for_scores(hidden_states)
+        value_layer = self.transpose_for_scores(hidden_states)
 
-        query_layer = self.transpose_for_scores(mixed_query_layer)
-        key_layer = self.transpose_for_scores(mixed_key_layer)
-        value_layer = self.transpose_for_scores(mixed_value_layer)
+        # We create a 3D attention mask from a 2D tensor mask.
+        # Sizes are [batch_size, 1, 1, to_seq_length]
+        # So we can broadcast to [batch_size, num_heads, from_seq_length, to_seq_length]
+        # this attention mask is more simple than the triangular masking of causal attention
+        # used in OpenAI GPT, we just need to prepare the broadcast dimension here.
+        extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
+
+        # Since attention_mask is 1.0 for positions we want to attend and 0.0 for
+        # masked positions, this operation will create a tensor which is 0.0 for
+        # positions we want to attend and -10000.0 for masked positions.
+        # Since we are adding it to the raw scores before the softmax, this is
+        # effectively the same as removing these entirely.
+        extended_attention_mask = extended_attention_mask.to(dtype=torch.float32) # fp16 compatibility
+        extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
+
 
         # Take the dot product between "query" and "key" to get the raw attention scores.
         attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
         # Apply the attention mask is (precomputed for all layers in BertModel forward() function)
-        attention_scores = attention_scores + attention_mask  # batch * head * seq * seq
-
+        attention_scores = attention_scores + extended_attention_mask  # batch * head * seq * seq
         # Normalize the attention scores to probabilities.
         attention_probs = nn.Softmax(dim=-1)(attention_scores)  # batch * head * seq * 1
 
         # This is actually dropping out entire tokens to attend to, which might
         # seem a bit unusual, but is taken from the original Transformer paper.
-        attention_probs = self.dropout(attention_probs)  # batch * head * seq * 1
+        # attention_probs = self.dropout(attention_probs)  # batch * head * seq * 1
 
         # Mask heads if we want to
         if head_mask is not None:
@@ -322,13 +329,14 @@ class SubtypeAttention(nn.Module):
 
         # value_layer: batch * head * seq * hidden
         context_layer = torch.matmul(attention_probs, value_layer)
-
-        context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
+        # print('context layer size', context_layer.size())
+        context_layer = context_layer.permute(0, 2, 1, 3).contiguous() # batch * seq * head * head_size
         new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
-        context_layer = context_layer.view(*new_context_layer_shape)
-
+        context_layer = context_layer.view(*new_context_layer_shape) # batch * seq * hidden
+        # context_layer = self.activation(context_layer)
         outputs = (context_layer, attention_probs) if self.output_attentions else (context_layer,)
-        return outputs
+        return outputs  # batch * 1 * hidden_size
+
 
 class BertSelfAttention(nn.Module):
     def __init__(self, config):
@@ -1462,11 +1470,11 @@ class BertEcomCommentMulti(BertPreTrainedModel):
     def __init__(self, config):
         super(BertEcomCommentMulti, self).__init__(config)
         self.num_labels = config.num_labels
-
+        self.num_tasks = config.num_tasks
         self.bert = BertModel(config)
         self.qa_outputs = nn.ModuleList()
         # 为每个subtype提供专门的全连接预测层
-        for i in range(26):
+        for i in range(self.num_tasks):
             self.qa_outputs.append(nn.Linear(config.hidden_size, config.num_labels))
 
         self.apply(self.init_weights)
@@ -1478,26 +1486,30 @@ class BertEcomCommentMulti(BertPreTrainedModel):
                             attention_mask=attention_mask, head_mask=head_mask)
         # outputs:
         sequence_output = outputs[0]  # batch * seq_length * hidden_size
-        print('sequence_ouput size', sequence_output.size())
         question_id = question_ids[0].item()
         if question_id == -1:
-            # w = torch.cat([i.weight for i in self.qa_outputs], dim=0)  # hidden_size * (num_labels * 26)
-            # b = torch.cat([i.bias for i in self.qa_outputs], dim=0)
-            #
-            # temp = F.linear(sequence_output, w, b)  # batch * seq_length * (num_labels * 26)
+            w = torch.cat([i.weight for i in self.qa_outputs], dim=0)  # hidden_size * (num_labels * 26)
+            b = torch.cat([i.bias for i in self.qa_outputs], dim=0)
+            temp = F.linear(sequence_output, w, b)  # batch * seq_length * (num_labels * 26)
+            temps = temp.split(1, dim=-1)
+            temps = [i.squeeze(-1) for i in temps]
+            start_logits_list = temps[0::self.num_labels]
+            end_logits_list = temps[1::self.num_labels]
+            op_start_logits_list = temps[2::self.num_labels]
+            op_end_logits_list = temps[3::self.num_labels]
             ## 只为多任务预测时使用
             print('predict all subtypes...')
-            start_logits_list, end_logits_list, op_start_logits_list, op_end_logits_list = [], [], [], []
-            for i in range(26):
-                # TOD 这里考虑矩阵拼接直接处理了, 便于GPU batchsize处理
-                output_layor = self.qa_outputs[i]
-                logits = output_layor(sequence_output)
-
-                start_logits, end_logits, op_start_logits, op_end_logits = logits.split(1, dim=-1)
-                start_logits_list.append(start_logits.squeeze(-1))
-                end_logits_list.append(end_logits.squeeze(-1))
-                op_start_logits_list.append(op_start_logits.squeeze(-1))
-                op_end_logits_list.append(op_end_logits.squeeze(-1))
+            # start_logits_list, end_logits_list, op_start_logits_list, op_end_logits_list = [], [], [], []
+            # for i in range(26):
+            #     # TOD 这里考虑矩阵拼接直接处理了, 便于GPU batchsize处理
+            #     output_layor = self.qa_outputs[i]
+            #     logits = output_layor(sequence_output)
+            #
+            #     start_logits, end_logits, op_start_logits, op_end_logits = logits.split(1, dim=-1)  # batch * seq * num
+            #     start_logits_list.append(start_logits.squeeze(-1)) # batch * seq
+            #     end_logits_list.append(end_logits.squeeze(-1)) # batch * seq
+            #     op_start_logits_list.append(op_start_logits.squeeze(-1)) # batch * seq
+            #     op_end_logits_list.append(op_end_logits.squeeze(-1))
             return (start_logits_list, end_logits_list, op_start_logits_list, op_end_logits_list) + outputs[2:]
 
         output_layor = self.qa_outputs[question_id]
@@ -1605,7 +1617,7 @@ class BertEcomCommentMultiPolar(BertPreTrainedModel):
 
     def forward(self, input_ids, token_type_ids=None, attention_mask=None, start_positions=None,
                 end_positions=None, op_start_positions=None, op_end_positions=None,
-                position_ids=None, head_mask=None, question_ids=None, labels=None):
+                position_ids=None, head_mask=None, question_ids=None, labels=None, kw_ids=None):
         outputs = self.bert(input_ids, position_ids=position_ids, token_type_ids=token_type_ids,
                             attention_mask=attention_mask, head_mask=head_mask)
         # outputs:
@@ -1730,24 +1742,32 @@ class BertEcomCommentMultiPolarV2(BertPreTrainedModel):
         self.num_tasks = config.num_tasks # 表示模型后端多少个subtype的特征/情感极性预测任务
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         self.bert = BertModel(config)
+        self.kw_attention = SubtypeAttention(config)
         self.qa_outputs = nn.ModuleList()
         self.classifiers = nn.ModuleList()
+        self.activation = nn.Tanh()
 
         # 为每个subtype提供专门的全连接预测层
         for i in range(self.num_tasks):
             self.qa_outputs.append(nn.Linear(config.hidden_size, config.num_labels))
-            self.classifiers.append(nn.Linear(config.hidden_size, self.num_polars))
+            self.classifiers.append(nn.Linear(config.hidden_size * 2, self.num_polars))
 
         self.apply(self.init_weights)
 
     def forward(self, input_ids, token_type_ids=None, attention_mask=None, start_positions=None,
                 end_positions=None, op_start_positions=None, op_end_positions=None,
-                position_ids=None, head_mask=None, question_ids=None, labels=None):
+                position_ids=None, head_mask=None, question_ids=None, labels=None, kw_ids=None):
         outputs = self.bert(input_ids, position_ids=position_ids, token_type_ids=token_type_ids,
                             attention_mask=attention_mask, head_mask=head_mask)
         # outputs:
         sequence_output = outputs[0]  # batch * seq_length * hidden_size
         question_id = question_ids[0].item()
+
+        subtype_states = self.bert.embeddings(kw_ids)  # batch * seq * hidden
+        subtype_states = torch.mean(subtype_states, dim=1, keepdim=True)  # batch * 1 * hidden
+        # print('subtype_state size', subtype_states.size())
+        kw_attention = self.kw_attention(subtype_states, sequence_output, attention_mask)[0] # batch * 1 * hidden
+        kw_attention = kw_attention.squeeze(-2)
         pooled_output = outputs[1]
         pooled_output = self.dropout(pooled_output)
 
@@ -1780,7 +1800,10 @@ class BertEcomCommentMultiPolarV2(BertPreTrainedModel):
         op_end_logits = op_end_logits.squeeze(-1)
 
         classifier_layor = self.classifiers[question_id % self.num_tasks]
-        class_logits = classifier_layor(pooled_output)
+        kw_attention = torch.cat([kw_attention, pooled_output], dim=1)
+        kw_attention = self.activation(kw_attention)
+        class_logits = classifier_layor(kw_attention) # batch * 1 * num_polar
+        # class_logits = class_logits.squeeze(-2)  # batch * num_polar
         # sequence_output, pooled_output, (hidden_states), (attentions)
         outputs = (start_logits, end_logits, op_start_logits, op_end_logits, class_logits) + outputs[2:]
         if start_positions is not None and end_positions is not None:

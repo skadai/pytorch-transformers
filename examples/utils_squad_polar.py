@@ -449,7 +449,7 @@ def convert_polar_examples_to_features(examples, label_list, max_seq_length,
         if ex_index % 10000 == 0:
             logger.info("Writing example %d of %d" % (ex_index, len(examples)))
 
-        question_id = question_ids.index(example.text_a) + 26
+        question_id = question_ids.index(example.text_a) + 26 # polar 训练编号从26开始
         tokens_a = tokenizer.tokenize("提及维度")  # TODO 此处统一带来何种影响呢
 
         tokens_b = None
