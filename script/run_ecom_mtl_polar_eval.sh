@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-
+# 依次接收三个参数 subtype, task_name, model_dirname
 
 SUBTYPE=$1
+TASK_NAME=$2
 
 export GLUE_DIR=/data/projects/bert_pytorch/
 export CUDA_VISIBLE_DEVICES=1
-export TASK_NAME=ecom_aspect_mtl_polar
 export SQUAD_DIR=$GLUE_DIR/${TASK_NAME}/$SUBTYPE
-export MODEL_DIR=$GLUE_DIR/${TASK_NAME}_out/all_in_one
+export MODEL_DIR=$GLUE_DIR/${TASK_NAME}_out/$3
 
 python ../examples/run_squad_polar.py \
     --model_type bert \

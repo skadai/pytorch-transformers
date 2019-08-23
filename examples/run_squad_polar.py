@@ -43,7 +43,6 @@ from pytorch_transformers import AdamW, WarmupLinearSchedule
 
 
 from utils_glue import processors, compute_metrics
-
 from utils_squad_polar import (read_squad_examples, convert_examples_to_features,
                          RawResult, write_predictions, write_polar_predictions,
                          read_multi_examples, read_ecom_examples, convert_polar_examples_to_features,
@@ -64,6 +63,31 @@ MODEL_CLASSES = {
     'xlnet': (XLNetConfig, XLNetForQuestionAnswering, XLNetTokenizer),
     'xlm': (XLMConfig, XLMForQuestionAnswering, XLMTokenizer),
 }
+
+class RunningAverage():
+    """A simple class that maintains the running average of a quantity
+
+    Example:
+    ```
+    loss_avg = RunningAverage()
+    loss_avg.update(2)
+    loss_avg.update(4)
+    loss_avg() = 3
+    ```
+    """
+
+    def __init__(self):
+        self.steps = 0
+        self.total = 0
+
+    def update(self, val):
+        self.total += val
+        self.steps += 1
+
+    def __call__(self):
+        return self.total / float(self.steps)
+
+
 
 def set_seed(args):
     random.seed(args.seed)
@@ -146,6 +170,7 @@ def train(args, train_dataset_dict, model, tokenizer):
     model.zero_grad()
     train_iterator = trange(int(args.num_train_epochs), desc="Epoch", disable=args.local_rank not in [-1, 0])
     set_seed(args)  # Added here for reproductibility (even between python 2 and 3)
+    loss_avg = RunningAverage()
     for _ in train_iterator:
 
         epoch_iterator = tqdm(range(sum_batch), desc="Iteration", disable=args.local_rank not in [-1, 0])
@@ -171,14 +196,17 @@ def train(args, train_dataset_dict, model, tokenizer):
                           'op_start_positions': batch[5],
                           'op_end_positions': batch[6],
                           'question_ids': batch[7],
-                          'labels': batch[8]}
+                          'labels': batch[8],
+                          'kw_ids': batch[9]}
             else:
                 # 情感极性的训练batch
                 inputs = {'input_ids':       batch[0],
                           'attention_mask':  batch[1],
                           'token_type_ids':  None if args.model_type == 'xlm' else batch[2],
                           'labels': batch[3],
-                          'question_ids': batch[4]}
+                          'question_ids': batch[4],
+                          'kw_ids': batch[5],
+                          }
             if args.model_type in ['xlnet', 'xlm']:
                 inputs.update({'cls_index': batch[5],
                                'p_mask':    batch[6]})
@@ -199,6 +227,9 @@ def train(args, train_dataset_dict, model, tokenizer):
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
 
             tr_loss += loss.item()
+            loss_avg.update(loss.item())
+            epoch_iterator.set_postfix(loss='{:05.3f}'.format(loss_avg()))
+
             if (step + 1) % args.gradient_accumulation_steps == 0:
                 scheduler.step()  # Update learning rate schedule
                 optimizer.step()
@@ -272,7 +303,8 @@ def evaluate_polar(args, model, tokenizer, prefix="",label_list=["1", "3", "5"])
                           'attention_mask': batch[1],
                           'token_type_ids': batch[2] if args.model_type in ['bert', 'xlnet'] else None,  # XLM don't use segment_ids
                           'labels':         batch[3],
-                          'question_ids':   batch[4]}
+                          'question_ids':   batch[4],
+                          'kw_ids': batch[5]}
                 outputs = model(**inputs)
                 logits = outputs[5]
 
@@ -284,7 +316,7 @@ def evaluate_polar(args, model, tokenizer, prefix="",label_list=["1", "3", "5"])
                 preds = np.append(preds, logits.detach().cpu().numpy(), axis=0)
                 out_label_ids = np.append(out_label_ids, inputs['labels'].detach().cpu().numpy(), axis=0)
 
-        print('pred is', preds)
+        # print('pred is', preds)
         preds = np.argmax(preds, axis=1)
 
         result = acc_and_f1(preds, out_label_ids)
@@ -330,7 +362,8 @@ def evaluate(args, model, tokenizer, prefix=""):
             inputs = {'input_ids':      batch[0],
                       'attention_mask': batch[1],
                       'token_type_ids': None if args.model_type == 'xlm' else batch[2],  # XLM don't use segment_ids
-                      'question_ids':  batch[4]
+                      'question_ids':  batch[4],
+                      'kw_ids': batch[5]
                       }
             example_indices = batch[3]
             if args.model_type in ['xlnet', 'xlm']:
@@ -408,8 +441,13 @@ def evaluate(args, model, tokenizer, prefix=""):
     # return results
 
 
-
 def load_and_cache_polar_examples(args, task, tokenizer, evaluate=False, label_list=None):
+    # 生成subtype id列表
+    subtype_ids = {}
+    for k, m in enumerate(TRANS_SUBTYPE.values()):
+        m = tokenizer.tokenize(m)
+        subtype_ids[k] = tokenizer.convert_tokens_to_ids(m)
+
     if args.local_rank not in [-1, 0]:
         torch.distributed.barrier()  # Make sure only the first process in distributed training process the dataset, and the others will use the cache
 
@@ -454,9 +492,10 @@ def load_and_cache_polar_examples(args, task, tokenizer, evaluate=False, label_l
         all_segment_ids = torch.tensor([f.segment_ids for f in features], dtype=torch.long)
         all_question_ids = torch.tensor([f.question_id for f in features], dtype=torch.long)
         all_label_ids = torch.tensor([f.label_id for f in features], dtype=torch.long)
+        all_subtype_ids = torch.tensor([subtype_ids[f.question_id % len(TRANS_SUBTYPE)] for f in features], dtype=torch.long)
 
 
-        dataset = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_label_ids, all_question_ids)
+        dataset = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_label_ids, all_question_ids, all_subtype_ids)
         dataset_dict[features[0].question_id] = dataset
     if evaluate:
         return dataset
@@ -465,8 +504,13 @@ def load_and_cache_polar_examples(args, task, tokenizer, evaluate=False, label_l
 
 
 
-
 def load_and_cache_examples(args, tokenizer, evaluate=False, output_examples=False):
+    # 生成subtype id列表
+    subtype_ids = {}
+    for k, m in enumerate(TRANS_SUBTYPE.values()):
+        m = tokenizer.tokenize(m)
+        subtype_ids[k] = tokenizer.convert_tokens_to_ids(m)
+
     if args.local_rank not in [-1, 0]:
         torch.distributed.barrier()  # Make sure only the first process in distributed training process the dataset, and the others will use the cache
 
@@ -520,12 +564,12 @@ def load_and_cache_examples(args, tokenizer, evaluate=False, output_examples=Fal
         all_p_mask = torch.tensor([f.p_mask for f in features], dtype=torch.float)
         all_question_ids = torch.tensor([f.question_id for f in features], dtype=torch.long)
         all_labels = torch.tensor([f.label for f in features], dtype=torch.long)
-
+        all_subtype_ids = torch.tensor([subtype_ids[f.question_id % len(TRANS_SUBTYPE)] for f in features], dtype=torch.long)
 
         if evaluate:
             all_example_index = torch.arange(all_input_ids.size(0), dtype=torch.long)
             dataset = TensorDataset(all_input_ids, all_input_mask, all_segment_ids,
-                                    all_example_index, all_question_ids, all_cls_index, all_p_mask)
+                                    all_example_index, all_question_ids, all_subtype_ids, all_cls_index, all_p_mask)
         else:
             all_start_positions = torch.tensor([f.start_position for f in features], dtype=torch.long)
             all_end_positions = torch.tensor([f.end_position for f in features], dtype=torch.long)
@@ -534,7 +578,7 @@ def load_and_cache_examples(args, tokenizer, evaluate=False, output_examples=Fal
             dataset = TensorDataset(all_input_ids, all_input_mask, all_segment_ids,
                                     all_start_positions, all_end_positions,
                                     all_op_start_positions, all_op_end_positions,
-                                    all_question_ids, all_labels, all_cls_index, all_p_mask)
+                                    all_question_ids, all_labels, all_subtype_ids, all_cls_index, all_p_mask)
         dataset_dict[features[0].question_id] = dataset
     if output_examples:
         return dataset, examples, features
@@ -698,16 +742,19 @@ def main():
 
     logger.info("Training/evaluation parameters %s", args)
 
+
     # Training
     if args.do_train:
-        train_dataset_dict = load_and_cache_examples(args, tokenizer, evaluate=False, output_examples=False)
-        train_dataset_dict.update(load_and_cache_polar_examples(args, 'ecom', tokenizer, evaluate=False, label_list=label_list))
+        train_dataset_dict = {}
+        # train_dataset_dict = load_and_cache_examples(args, tokenizer, evaluate=False, output_examples=False)
+        train_dataset_dict.update(load_and_cache_polar_examples(args, 'ecom', tokenizer, evaluate=False,
+                                                                label_list=label_list))
         global_step, tr_loss = train(args, train_dataset_dict, model, tokenizer)
         logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
 
     # Save the trained model and the tokenizer
-    if args.do_train and (args.local_rank == -1 or torch.distributed.get_rank() == 0):
+    if (args.local_rank == -1 or torch.distributed.get_rank() == 0):
         # Create output directory if needed
         if not os.path.exists(args.output_dir) and args.local_rank in [-1, 0]:
             os.makedirs(args.output_dir)

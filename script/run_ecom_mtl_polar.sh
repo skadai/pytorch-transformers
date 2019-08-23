@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
+# 依次接收2个参数 subtype, task_name
 
 
 SUBTYPE=$1
+TASK_NAME=$2
 
 export GLUE_DIR=/data/projects/bert_pytorch/
 export CUDA_VISIBLE_DEVICES=1
-export TASK_NAME=ecom_aspect_mtl_polar
 export SQUAD_DIR=$GLUE_DIR/${TASK_NAME}/$SUBTYPE
 
 
@@ -21,7 +22,7 @@ python ../examples/run_squad_polar.py \
     --train_file $SQUAD_DIR/train.json \
     --predict_file $SQUAD_DIR/dev.json \
     --learning_rate 2e-5 \
-    --num_train_epochs 2 \
+    --num_train_epochs 1 \
     --max_seq_length 256 \
     --save_steps 1000 \
     --doc_stride 128 \
