@@ -1498,7 +1498,7 @@ class BertEcomCommentMulti(BertPreTrainedModel):
             op_start_logits_list = temps[2::self.num_labels]
             op_end_logits_list = temps[3::self.num_labels]
             ## 只为多任务预测时使用
-            print('predict all subtypes...')
+            # print('predict all subtypes...')
             # start_logits_list, end_logits_list, op_start_logits_list, op_end_logits_list = [], [], [], []
             # for i in range(26):
             #     # TOD 这里考虑矩阵拼接直接处理了, 便于GPU batchsize处理
@@ -1697,6 +1697,7 @@ class BertEcomCommentMultiPolar(BertPreTrainedModel):
                       BERT_START_DOCSTRING, BERT_INPUTS_DOCSTRING)
 class BertEcomCommentMultiPolarV2(BertPreTrainedModel):
     r"""
+        bert encoder 输出和subtype关键词进行attention, 输出和CLS poolout concat之后进行全连接层的转换输出
         **start_positions**: (`optional`) ``torch.LongTensor`` of shape ``(batch_size,)``:
             Labels for position (index) of the start of the labelled span for computing the token classification loss.
             Positions are clamped to the length of the sequence (`sequence_length`).
@@ -1804,6 +1805,155 @@ class BertEcomCommentMultiPolarV2(BertPreTrainedModel):
         kw_attention = self.activation(kw_attention)
         class_logits = classifier_layor(kw_attention) # batch * 1 * num_polar
         # class_logits = class_logits.squeeze(-2)  # batch * num_polar
+        # sequence_output, pooled_output, (hidden_states), (attentions)
+        outputs = (start_logits, end_logits, op_start_logits, op_end_logits, class_logits) + outputs[2:]
+        if start_positions is not None and end_positions is not None:
+            # If we are on multi-GPU, split add a dimension
+            if len(start_positions.size()) > 1:
+                start_positions = start_positions.squeeze(-1)
+            if len(end_positions.size()) > 1:
+                end_positions = end_positions.squeeze(-1)
+            if len(op_start_positions.size()) > 1:
+                op_start_positions = op_start_positions.squeeze(-1)
+            if len(op_end_positions.size()) > 1:
+                op_end_positions = op_end_positions.squeeze(-1)
+
+            # sometimes the start/end positions are outside our model inputs, we ignore these terms
+            ignored_index = start_logits.size(1)
+
+            start_positions.clamp_(0, ignored_index)
+            end_positions.clamp_(0, ignored_index)
+            op_start_positions.clamp_(0, ignored_index)
+            op_end_positions.clamp_(0, ignored_index)
+
+            loss_fct = CrossEntropyLoss(ignore_index=ignored_index)
+            start_loss = loss_fct(start_logits, start_positions)
+            end_loss = loss_fct(end_logits, end_positions)
+            op_start_loss = loss_fct(op_start_logits, op_start_positions)
+            op_end_loss = loss_fct(op_end_logits, op_end_positions)
+
+            total_loss = (start_loss + end_loss + op_start_loss + op_end_loss) / 4
+            outputs = (total_loss,) + outputs
+        elif labels is not None:
+            class_loss_fct = CrossEntropyLoss()
+            class_loss = class_loss_fct(class_logits.view(-1, self.num_polars), labels.view(-1))
+            outputs = (class_loss,) + outputs
+        return outputs  # (loss), start_logits, end_logits, (hidden_states), (attentions)
+
+
+@add_start_docstrings("""Bert Model with a span classification head on top for extractive question-answering tasks like SQuAD (a linear layers on top of
+    the hidden-states output to compute `span start logits` and `span end logits`). """,
+                      BERT_START_DOCSTRING, BERT_INPUTS_DOCSTRING)
+class BertEcomCommentMultiPolarV3(BertPreTrainedModel):
+    r"""
+        bert encoder 输出和subtype关键词进行attention, 输出和进行全连接层的转换输出, 完全抛弃CLS, 共用一个classfier层, 以免多个subtype对其产生了影响
+        **start_positions**: (`optional`) ``torch.LongTensor`` of shape ``(batch_size,)``:
+            Labels for position (index) of the start of the labelled span for computing the token classification loss.
+            Positions are clamped to the length of the sequence (`sequence_length`).
+            Position outside of the sequence are not taken into account for computing the loss.
+        **end_positions**: (`optional`) ``torch.LongTensor`` of shape ``(batch_size,)``:
+            Labels for position (index) of the end of the labelled span for computing the token classification loss.
+            Positions are clamped to the length of the sequence (`sequence_length`).
+            Position outside of the sequence are not taken into account for computing the loss.
+
+    Outputs: `Tuple` comprising various elements depending on the configuration (config) and inputs:
+        **loss**: (`optional`, returned when ``labels`` is provided) ``torch.FloatTensor`` of shape ``(1,)``:
+            Total span extraction loss is the sum of a Cross-Entropy for the start and end positions.
+        **start_scores**: ``torch.FloatTensor`` of shape ``(batch_size, sequence_length,)``
+            Span-start scores (before SoftMax).
+        **end_scores**: ``torch.FloatTensor`` of shape ``(batch_size, sequence_length,)``
+            Span-end scores (before SoftMax).
+        **hidden_states**: (`optional`, returned when ``config.output_hidden_states=True``)
+            list of ``torch.FloatTensor`` (one for the output of each layer + the output of the embeddings)
+            of shape ``(batch_size, sequence_length, hidden_size)``:
+            Hidden-states of the model at the output of each layer plus the initial embedding outputs.
+        **attentions**: (`optional`, returned when ``config.output_attentions=True``)
+            list of ``torch.FloatTensor`` (one for each layer) of shape ``(batch_size, num_heads, sequence_length, sequence_length)``:
+            Attentions weights after the attention softmax, used to compute the weighted average in the self-attention heads.
+
+    Examples::
+
+        config = BertConfig.from_pretrained('bert-base-uncased')
+        tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+
+        model = BertEcomCommentExtraction(config)
+        input_ids = torch.tensor(tokenizer.encode("Hello, my dog is cute")).unsqueeze(0)  # Batch size 1
+        start_positions = torch.tensor([1])
+        end_positions = torch.tensor([3])
+        outputs = model(input_ids, start_positions=start_positions, end_positions=end_positions)
+        loss, start_scores, end_scores = outputs[:2]
+
+    """
+
+    def __init__(self, config):
+        super(BertEcomCommentMultiPolarV3, self).__init__(config)
+        self.num_labels = config.num_labels
+        self.num_polars = config.num_polars
+        self.num_tasks = config.num_tasks # 表示模型后端多少个subtype的特征/情感极性预测任务
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+        self.bert = BertModel(config)
+        self.kw_attention = SubtypeAttention(config)
+        self.qa_outputs = nn.ModuleList()
+        self.classifiers = nn.ModuleList()
+        self.activation = nn.Tanh()
+
+        # 为每个subtype提供专门的全连接预测层
+        for i in range(self.num_tasks):
+            self.qa_outputs.append(nn.Linear(config.hidden_size, config.num_labels))
+            self.classifiers.append(nn.Linear(config.hidden_size, self.num_polars))
+
+        self.apply(self.init_weights)
+
+    def forward(self, input_ids, token_type_ids=None, attention_mask=None, start_positions=None,
+                end_positions=None, op_start_positions=None, op_end_positions=None,
+                position_ids=None, head_mask=None, question_ids=None, labels=None, kw_ids=None):
+        outputs = self.bert(input_ids, position_ids=position_ids, token_type_ids=token_type_ids,
+                            attention_mask=attention_mask, head_mask=head_mask)
+        # outputs:
+        sequence_output = outputs[0]  # batch * seq_length * hidden_size
+        question_id = question_ids[0].item()
+
+        subtype_states = self.bert.embeddings(kw_ids)  # batch * seq * hidden
+        subtype_states = torch.mean(subtype_states, dim=1, keepdim=True)  # batch * 1 * hidden
+        # print('subtype_state size', subtype_states.size())
+        kw_attention = self.kw_attention(subtype_states, sequence_output, attention_mask)[0] # batch * 1 * hidden
+        kw_attention = kw_attention.squeeze(-2)
+        pooled_output = outputs[1]
+        pooled_output = self.dropout(pooled_output)
+
+        if question_id == -1:
+            ## 只为多任务预测时使用
+            print('predict all subtypes...')
+            start_logits_list, end_logits_list, op_start_logits_list, op_end_logits_list, class_logits_list = [], [], [], [], []
+            for i in range(self.num_tasks):
+                # TOD 这里考虑矩阵拼接直接处理了, 便于GPU batchsize处理
+                output_layor = self.qa_outputs[i]
+                classifier_layor = self.classifiers[i]
+                class_logits = classifier_layor(pooled_output)
+                logits = output_layor(sequence_output)
+
+                start_logits, end_logits, op_start_logits, op_end_logits = logits.split(1, dim=-1)
+                start_logits_list.append(start_logits.squeeze(-1))
+                end_logits_list.append(end_logits.squeeze(-1))
+                op_start_logits_list.append(op_start_logits.squeeze(-1))
+                op_end_logits_list.append(op_end_logits.squeeze(-1))
+                op_end_logits_list.append(class_logits)
+            return (start_logits_list, end_logits_list, op_start_logits_list, op_end_logits_list, class_logits_list) + outputs[2:]
+
+        output_layor = self.qa_outputs[question_id % self.num_tasks]
+
+        logits = output_layor(sequence_output)  # batch * seq_length * num_labels
+        start_logits, end_logits, op_start_logits, op_end_logits = logits.split(1, dim=-1)  # batch * seq_length * 1
+        start_logits = start_logits.squeeze(-1)  # batch * seq_length
+        end_logits = end_logits.squeeze(-1)
+        op_start_logits = op_start_logits.squeeze(-1)
+        op_end_logits = op_end_logits.squeeze(-1)
+
+        # classifier_layor = self.classifiers[question_id % self.num_tasks]
+        classifier_layor = self.classifiers[0]
+        # kw_attention = torch.cat([kw_attention, pooled_output], dim=1)
+        kw_attention = self.activation(kw_attention)
+        class_logits = classifier_layor(kw_attention) # batch * 1 * num_polar
         # sequence_output, pooled_output, (hidden_states), (attentions)
         outputs = (start_logits, end_logits, op_start_logits, op_end_logits, class_logits) + outputs[2:]
         if start_positions is not None and end_positions is not None:

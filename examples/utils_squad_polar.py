@@ -723,7 +723,7 @@ def convert_examples_to_features(examples, tokenizer, max_seq_length,
                     end_position = 0
                     span_is_impossible = True
                 else:
-                    doc_offset = len(query_tokens) + 2
+                    doc_offset = len(query_tokens) + 2  # 这里其实限制了query token 是不会出现正负评论的
                     start_position = tok_start_position - doc_start + doc_offset
                     end_position = tok_end_position - doc_start + doc_offset
 
@@ -931,6 +931,7 @@ def write_predictions(all_examples, all_features, all_results, n_best_size,
         null_start_logit = 0  # the start logit at the slice with min null score
         null_end_logit = 0  # the end logit at the slice with min null score
         for (feature_index, feature) in enumerate(features):
+            # 为每一个feature 预测最终结果
             result = unique_id_to_result[feature.unique_id]
             start_indexes = _get_best_indexes(result.start_logits, n_best_size)
             end_indexes = _get_best_indexes(result.end_logits, n_best_size)
