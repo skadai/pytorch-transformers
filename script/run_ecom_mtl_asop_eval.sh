@@ -9,14 +9,13 @@ export CUDA_VISIBLE_DEVICES=1
 export SQUAD_DIR=$GLUE_DIR/${TASK_NAME}/$SUBTYPE
 export MODEL_DIR=$GLUE_DIR/${TASK_NAME}_out/$3
 
-python ../examples/run_squad_polar.py \
-    --model_type polar_raw \
+python ../examples/run_squad_multi_plus.py \
+    --model_type multi_v2 \
     --model_name_or_path $MODEL_DIR/pytorch_model.bin \
     --config_name $MODEL_DIR/config.json \
     --tokenizer_name  $MODEL_DIR/vocab.txt \
     --do_eval \
     --do_lower_case \
-    --polar \
     --multi_subtype_dir $GLUE_DIR/${TASK_NAME} \
     --ecom_subtype $SUBTYPE  \
     --train_file $SQUAD_DIR/train.json \
@@ -26,7 +25,7 @@ python ../examples/run_squad_polar.py \
     --max_seq_length 256 \
     --save_steps 1000 \
     --doc_stride 128 \
-    --output_dir $GLUE_DIR/${TASK_NAME}_out/$SUBTYPE \
+    --output_dir $GLUE_DIR/${TASK_NAME}_out/$3/$SUBTYPE \
     --per_gpu_eval_batch_size=32   \
     --per_gpu_train_batch_size=16   \
     --version_2_with_negative \

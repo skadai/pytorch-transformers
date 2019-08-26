@@ -6,7 +6,7 @@ SUBTYPE=$1
 TASK_NAME=$2
 
 export GLUE_DIR=/data/projects/bert_pytorch/
-export CUDA_VISIBLE_DEVICES=1
+export CUDA_VISIBLE_DEVICES=0
 export SQUAD_DIR=$GLUE_DIR/${TASK_NAME}/$SUBTYPE
 
 

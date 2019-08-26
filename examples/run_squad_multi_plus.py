@@ -33,8 +33,8 @@ from tqdm import tqdm, trange
 from tensorboardX import SummaryWriter
 
 from pytorch_transformers import (WEIGHTS_NAME, BertConfig,
-                                  BertEcomCommentMultiPolar, BertEcomCommentMultiPolarV2,
-                                  BertEcomCommentMultiPolarV3, BertTokenizer,
+                                  BertEcomCommentMultiPolar, BertEcomCommentMultiV2,
+                                  BertTokenizer,
                                   XLMConfig, XLMForQuestionAnswering,
                                   XLMTokenizer, XLNetConfig,
                                   XLNetForQuestionAnswering,
@@ -44,7 +44,7 @@ from pytorch_transformers import AdamW, WarmupLinearSchedule
 
 
 from utils_glue import processors, compute_metrics
-from utils_squad_polar import (read_squad_examples, convert_examples_to_features,
+from utils_squad_multi_plus import (convert_examples_to_features,
                          RawResult, write_predictions, write_polar_predictions,
                          read_multi_examples, read_ecom_examples, convert_polar_examples_to_features,
                          RawResultExtended, write_predictions_extended, acc_and_f1, TRANS_SUBTYPE)
@@ -60,9 +60,8 @@ ALL_MODELS = sum((tuple(conf.pretrained_config_archive_map.keys()) \
                   for conf in (BertConfig, XLNetConfig, XLMConfig)), ())
 
 MODEL_CLASSES = {
-    'polar_raw': (BertConfig, BertEcomCommentMultiPolar, BertTokenizer),
-    'polar_att': (BertConfig, BertEcomCommentMultiPolarV2, BertTokenizer),
-    'polar_mix': (BertConfig, BertEcomCommentMultiPolarV3, BertTokenizer),
+    'bert': (BertConfig, BertEcomCommentMultiPolar, BertTokenizer),
+    'multi_v2': (BertConfig, BertEcomCommentMultiV2, BertTokenizer),
     'xlnet': (XLNetConfig, XLNetForQuestionAnswering, XLNetTokenizer),
     'xlm': (XLMConfig, XLMForQuestionAnswering, XLMTokenizer),
 }
@@ -198,9 +197,11 @@ def train(args, train_dataset_dict, model, tokenizer):
                           'end_positions':   batch[4],
                           'op_start_positions': batch[5],
                           'op_end_positions': batch[6],
-                          'question_ids': batch[7],
-                          'labels': batch[8],
-                          'kw_ids': batch[9]}
+                          'polar_start_positions': batch[7],
+                          'polar_end_positions': batch[8],
+                          'question_ids': batch[9],
+                          'labels': batch[10],
+                          'kw_ids': batch[11]}
             else:
                 # 情感极性的训练batch
                 inputs = {'input_ids':       batch[0],
@@ -357,7 +358,7 @@ def evaluate(args, model, tokenizer, prefix=""):
     logger.info("  Batch size = %d", args.eval_batch_size)
     all_results = []
     op_all_results = []
-    # all_polar_results = []
+    polar_all_results = []
     for batch in tqdm(eval_dataloader, desc="Evaluating"):
         model.eval()
         batch = tuple(t.to(args.device) for t in batch)
@@ -394,11 +395,14 @@ def evaluate(args, model, tokenizer, prefix=""):
                 op_result = RawResult(unique_id = unique_id,
                                    start_logits = to_list(outputs[2][i]),
                                    end_logits = to_list(outputs[3][i]))
+                polar_result = RawResult(unique_id=unique_id,
+                                      start_logits=to_list(outputs[4][i]),
+                                      end_logits=to_list(outputs[5][i]))
                 # polar_result = to_list(outputs[4][i])
 
             all_results.append(result)
             op_all_results.append(op_result)
-            # all_polar_results.append(polar_result)
+            polar_all_results.append(polar_result)
 
     # Compute predictions
     output_polar_file = os.path.join(args.output_dir, "polarity_preds_{}.csv".format(prefix))
@@ -406,14 +410,17 @@ def evaluate(args, model, tokenizer, prefix=""):
     output_nbest_file = os.path.join(args.output_dir, "nbest_predictions_{}.json".format(prefix))
     op_output_prediction_file = os.path.join(args.output_dir, "op_predictions_{}.json".format(prefix))
     op_output_nbest_file = os.path.join(args.output_dir, "op_nbest_predictions_{}.json".format(prefix))
+    polar_output_prediction_file = os.path.join(args.output_dir, "polar_predictions_{}.json".format(prefix))
+    polar_output_nbest_file = os.path.join(args.output_dir, "polar_nbest_predictions_{}.json".format(prefix))
     if args.version_2_with_negative:
         output_null_log_odds_file = os.path.join(args.output_dir, "null_odds_{}.json".format(prefix))
         op_output_null_log_odds_file = os.path.join(args.output_dir, "op_null_odds_{}.json".format(prefix))
+        polar_output_null_log_odds_file = os.path.join(args.output_dir, "polar_null_odds_{}.json".format(prefix))
 
     else:
         output_null_log_odds_file = None
         op_output_null_log_odds_file = None
-
+        polar_output_null_log_odds_file = None
 
 
     if args.model_type in ['xlnet', 'xlm']:
@@ -434,7 +441,10 @@ def evaluate(args, model, tokenizer, prefix=""):
                         args.max_answer_length, args.do_lower_case, op_output_prediction_file,
                         op_output_nbest_file, op_output_null_log_odds_file, args.verbose_logging,
                         args.version_2_with_negative, args.null_score_diff_threshold)
-
+        write_predictions(examples, features, polar_all_results, args.n_best_size,
+                        args.max_answer_length, args.do_lower_case, polar_output_prediction_file,
+                        polar_output_nbest_file, polar_output_null_log_odds_file, args.verbose_logging,
+                        args.version_2_with_negative, args.null_score_diff_threshold)
 
     # # Evaluate with the official SQuAD script
     # evaluate_options = EVAL_OPTS(data_file=args.predict_file,
@@ -537,11 +547,6 @@ def load_and_cache_examples(args, tokenizer, evaluate=False, output_examples=Fal
             features = torch.load(cached_features_file)
         else:
             logger.info("Creating features from dataset file at %s", input_file)
-            # examples = read_squad_examples(input_file=input_file,
-            #                                         is_training=not evaluate,
-            #                                         version_2_with_negative=args.version_2_with_negative)
-
-
             examples = read_ecom_examples(input_file=input_file,
                                           is_training=not evaluate,
                                           subtype=dirname)
@@ -551,7 +556,7 @@ def load_and_cache_examples(args, tokenizer, evaluate=False, output_examples=Fal
                                                     doc_stride=args.doc_stride,
                                                     max_query_length=args.max_query_length,
                                                     is_training=not evaluate,
-                                                    label_list=[1, 3, 5])
+                                                    label_list=[1, 3 ,5])
             if args.local_rank in [-1, 0]:
                 logger.info("Saving features into cached file %s", cached_features_file)
                 torch.save(features, cached_features_file)
@@ -578,9 +583,12 @@ def load_and_cache_examples(args, tokenizer, evaluate=False, output_examples=Fal
             all_end_positions = torch.tensor([f.end_position for f in features], dtype=torch.long)
             all_op_start_positions = torch.tensor([f.op_start_position for f in features], dtype=torch.long)
             all_op_end_positions = torch.tensor([f.op_end_position for f in features], dtype=torch.long)
+            all_polar_start_positions = torch.tensor([f.polar_start_position for f in features], dtype=torch.long)
+            all_polar_end_positions = torch.tensor([f.polar_end_position for f in features], dtype=torch.long)
             dataset = TensorDataset(all_input_ids, all_input_mask, all_segment_ids,
                                     all_start_positions, all_end_positions,
                                     all_op_start_positions, all_op_end_positions,
+                                    all_polar_start_positions, all_polar_end_positions,
                                     all_question_ids, all_labels, all_subtype_ids, all_cls_index, all_p_mask)
         dataset_dict[features[0].question_id] = dataset
     if output_examples:
@@ -734,7 +742,7 @@ def main():
     config = config_class.from_pretrained(args.config_name if args.config_name else args.model_name_or_path)
 
     ## 强制 num_labels = 4
-    config.num_labels = 4
+    config.num_labels = 6
     label_list = ["1", "3", "5"]
     tokenizer = tokenizer_class.from_pretrained(args.tokenizer_name if args.tokenizer_name else args.model_name_or_path, do_lower_case=args.do_lower_case)
     model = model_class.from_pretrained(args.model_name_or_path, from_tf=bool('.ckpt' in args.model_name_or_path), config=config)
@@ -749,9 +757,9 @@ def main():
     # Training
     if args.do_train:
         train_dataset_dict = {}
-        # train_dataset_dict = load_and_cache_examples(args, tokenizer, evaluate=False, output_examples=False)
-        train_dataset_dict.update(load_and_cache_polar_examples(args, 'ecom', tokenizer, evaluate=False,
-                                                                label_list=label_list))
+        train_dataset_dict = load_and_cache_examples(args, tokenizer, evaluate=False, output_examples=False)
+        # train_dataset_dict.update(load_and_cache_polar_examples(args, 'ecom', tokenizer, evaluate=False,
+        #                                                         label_list=label_list))
         global_step, tr_loss = train(args, train_dataset_dict, model, tokenizer)
         logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
