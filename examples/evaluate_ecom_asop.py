@@ -31,14 +31,6 @@ from utils_squad_multi_plus import read_ecom_examples, read_multi_examples, TRAN
 OPTS = None
 
 
-FUNC_LOADER = {
-    'op_multi': read_multi_examples_op,
-    'op_single': read_ecom_examples_op,
-    'multi': read_multi_examples,
-    'single': read_ecom_examples
-}
-
-
 def parse_args():
     parser = argparse.ArgumentParser('Official evaluation script for SQuAD version 2.0.')
     parser.add_argument('pred_dir', metavar='pred_dir', help='Model predictions.')
@@ -329,7 +321,7 @@ def main():
     prefix = f'{OPTS.score_type}_'
     if prefix == 'aspect_':
         prefix = ""
-    pred_file_path = f'{data_dir}_out/all_in_one/{OPTS.pred_dir}/{prefix}predictions_.json'
+    pred_file_path = f'{data_dir}_out/all_in_one_v2/{OPTS.pred_dir}/{prefix}predictions_.json'
 
     data_file_path = f'{data_dir}/{OPTS.pred_dir}/dev.json'
     na_prob_file_path = f'{data_dir}_out/{OPTS.pred_dir}/{prefix}null_odds_.json'
