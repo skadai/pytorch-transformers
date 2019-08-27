@@ -5,7 +5,7 @@ SUBTYPE=$1
 TASK_NAME=$2
 
 export GLUE_DIR=/data/projects/bert_pytorch/
-export CUDA_VISIBLE_DEVICES=1
+export CUDA_VISIBLE_DEVICES=0
 export SQUAD_DIR=$GLUE_DIR/${TASK_NAME}/$SUBTYPE
 export MODEL_DIR=$GLUE_DIR/${TASK_NAME}_out/$3
 
@@ -23,7 +23,7 @@ python ../examples/run_squad_multi_plus.py \
     --learning_rate 2e-5 \
     --num_train_epochs 1 \
     --max_seq_length 256 \
-    --save_steps 1000 \
+    --save_steps 2500 \
     --doc_stride 128 \
     --output_dir $GLUE_DIR/${TASK_NAME}_out/$3/$SUBTYPE \
     --per_gpu_eval_batch_size=32   \
