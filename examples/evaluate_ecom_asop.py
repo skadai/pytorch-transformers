@@ -23,10 +23,8 @@ import string
 import sys
 
 
-# from utils_squad import read_ecom_examples, read_multi_examples, TRANS_SUBTYPE
-from utils_squad_op import read_ecom_examples as read_ecom_examples_op
-from utils_squad_op import read_multi_examples as read_multi_examples_op
-from utils_squad_multi_plus import read_ecom_examples, read_multi_examples, TRANS_SUBTYPE
+
+from utils_skincare import read_ecom_examples, read_multi_examples, TRANS_SUBTYPE
 
 OPTS = None
 
@@ -321,10 +319,10 @@ def main():
     prefix = f'{OPTS.score_type}_'
     if prefix == 'aspect_':
         prefix = ""
-    pred_file_path = f'{data_dir}_out/all_in_one_v2/{OPTS.pred_dir}/{prefix}predictions_.json'
+    pred_file_path = f'{data_dir}_out/all_in_one_bert_ep10/checkpoint-3000/{OPTS.pred_dir}/{prefix}predictions_.json'
 
     data_file_path = f'{data_dir}/{OPTS.pred_dir}/dev.json'
-    na_prob_file_path = f'{data_dir}_out/{OPTS.pred_dir}/{prefix}null_odds_.json'
+    na_prob_file_path = f'{data_dir}_out/all_in_one_bert_ep10/checkpoint-3000/{OPTS.pred_dir}/{prefix}null_odds_.json'
     if OPTS.multi:
         flag = f'{prefix}multi'
         dataset = read_multi_examples(data_dir, is_training=True, filename='dev.json')

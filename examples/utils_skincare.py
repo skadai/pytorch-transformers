@@ -128,7 +128,6 @@ class InputPolarFeatures(object):
 
 class InputFeatures(object):
     """A single set of features of data."""
-
     def __init__(self,
                  unique_id,
                  example_index,

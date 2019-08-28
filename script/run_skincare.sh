@@ -12,9 +12,9 @@ export SQUAD_DIR=$GLUE_DIR/${TASK_NAME}/$SUBTYPE
 
 python ../examples/run_skincare.py \
     --model_type  multi_v2 \
-    --model_name_or_path $GLUE_DIR/${TASK_NAME}/pytorch_model.bin \
-    --config_name $GLUE_DIR/${TASK_NAME}/config.json \
-    --tokenizer_name  $GLUE_DIR/${TASK_NAME}/vocab.txt \
+    --model_name_or_path $GLUE_DIR/pytorch_model.bin \
+    --config_name $GLUE_DIR/config.json \
+    --tokenizer_name  $GLUE_DIR/vocab.txt \
     --do_train \
     --do_lower_case \
     --multi_subtype_dir $GLUE_DIR/${TASK_NAME} \
@@ -23,8 +23,12 @@ python ../examples/run_skincare.py \
     --predict_file $SQUAD_DIR/dev.json \
     --learning_rate 5e-5 \
     --num_train_epochs 1 \
+    --adam_epsilon 1e-6 \
     --max_seq_length 256 \
-    --save_steps 2000 \
+    --max_answer_length 20 \
+    --save_steps 600 \
+    --fp16 \
+    --weight_decay 0.01 \
     --doc_stride 128 \
     --output_dir $GLUE_DIR/${TASK_NAME}_out/$SUBTYPE \
     --per_gpu_eval_batch_size=32   \
