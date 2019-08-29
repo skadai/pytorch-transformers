@@ -697,7 +697,7 @@ def convert_examples_to_features(examples, tokenizer, max_seq_length,
                     start_position = 0
                     end_position = 0
                     polar_start_position = 0
-                    end_polar_position = 0
+                    polar_end_position = 0
                     span_is_impossible = True
                 else:
                     doc_offset = len(query_tokens) + 2  # 这里其实限制了query token 是不会出现正负评论的

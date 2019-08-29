@@ -79,7 +79,8 @@ def prepare_text(text):
     clear_text = re.sub(r"\n", '', text)
     demojized_text = emoji.demojize(clear_text)
     ready_text = re.sub(':[\w_-]+:', '', demojized_text)
-    ready_text = re.sub("[~@#￥%…&*（）；【】：:]+", " ", ready_text)
+    ready_text = re.sub("[~@#￥%…&*（）；【】,。，！？]+", " ", ready_text)
+    ready_text = re.sub('[ ]+', ',', ready_text)  # 替换空格为逗号
     return ready_text
 
 

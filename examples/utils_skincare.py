@@ -34,19 +34,14 @@ from pytorch_transformers.tokenization_bert import BasicTokenizer, whitespace_to
 
 # Required by XLNet evaluation method to compute optimal threshold (see write_predictions_extended() method)
 from utils_squad_evaluate import find_all_best_thresh_v2, make_qid_to_has_ans, get_raw_scores
+from data_preprocess import convert_text
 
 logger = logging.getLogger(__name__)
 
 
-TRANS_SUBTYPE = {
-     "Fat Granule": "脂肪粒",
-     "Greasy": "油腻",
-     "Irritation": "刺激",
-     "Moisturization": "保湿",
-     "Smell": "气味",
-      "Whitening": "肤色改善"
-}
 
+SUBTYPE_DICT = json.load(open(os.path.join(os.path.dirname(__file__), 'SUBTYPE.json'), 'r'))
+TRANS_SUBTYPE = SUBTYPE_DICT['skincare']
 
 
 class SquadExample(object):
@@ -116,6 +111,7 @@ class SquadExample(object):
             s += ", label: %r" % (self.label)
         return s
 
+
 class InputPolarFeatures(object):
     """A single set of features of data."""
 
@@ -125,6 +121,7 @@ class InputPolarFeatures(object):
         self.segment_ids = segment_ids
         self.label_id = label_id
         self.question_id = question_id
+
 
 class InputFeatures(object):
     """A single set of features of data."""
@@ -267,7 +264,7 @@ def read_ecom_examples(input_file, is_training, subtype, start_idx = 0):
     input_data = load_dat(input_file)
     target_subtype = subtype.replace('_', ' ').replace('.', '/')
     for idx, entry in enumerate(input_data):
-        doc_tokens = '正面/负面/中性 ' + entry['text']
+        doc_tokens = '正面/负面/中性/' + convert_text(entry['text'])
         for op in entry['opinions']:
             if op['aspectSubtype'] == target_subtype:
                 aspect_terms = op['aspectTerm']
@@ -383,7 +380,7 @@ def convert_polar_examples_to_features(examples, label_list, max_seq_length,
             logger.info("Writing example %d of %d" % (ex_index, len(examples)))
 
         question_id = question_ids.index(example.text_a) + 26 # polar 训练编号从26开始
-        tokens_a = tokenizer.tokenize("提及维度")  # TODO 此处统一带来何种影响呢
+        tokens_a = tokenizer.tokenize("维度")  # TODO 此处统一带来何种影响呢
 
         tokens_b = None
         if example.text_b:
@@ -500,7 +497,7 @@ def convert_examples_to_features(examples, tokenizer, max_seq_length,
         #     logger.info('Converting %s/%s pos %s neg %s', example_index, len(examples), cnt_pos, cnt_neg)
 
         # query_tokens = tokenizer.tokenize(example.question_text)
-        query_tokens = tokenizer.tokenize("维度")
+        query_tokens = tokenizer.tokenize("")
 
         if len(query_tokens) > max_query_length:
             query_tokens = query_tokens[0:max_query_length]
@@ -549,6 +546,7 @@ def convert_examples_to_features(examples, tokenizer, max_seq_length,
             (tok_polar_start_position, tok_polar_end_position) = _improve_answer_span(
                 all_doc_tokens, tok_polar_start_position, tok_polar_end_position, tokenizer,
                 example.polar_answer_text)
+            # print('polar start pos', tok_polar_start_position, tok_polar_end_position)
 
 
         if is_training and example.is_op_impossible:
@@ -616,8 +614,8 @@ def convert_examples_to_features(examples, tokenizer, max_seq_length,
             # Paragraph
             for i in range(doc_span.length):
                 split_token_index = doc_span.start + i
+                # 将query token彻底排除在外了
                 token_to_orig_map[len(tokens)] = tok_to_orig_index[split_token_index]
-
                 is_max_context = _check_is_max_context(doc_spans, doc_span_index,
                                                        split_token_index)
                 token_is_max_context[len(tokens)] = is_max_context
@@ -676,7 +674,7 @@ def convert_examples_to_features(examples, tokenizer, max_seq_length,
                     start_position = 0
                     end_position = 0
                     polar_start_position = 0
-                    end_polar_position = 0
+                    polar_end_position = 0
                     span_is_impossible = True
                 else:
                     doc_offset = len(query_tokens) + 2  # 这里其实限制了query token 是不会出现正负评论的

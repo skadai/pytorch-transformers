@@ -713,12 +713,17 @@ def _check_is_max_context(doc_spans, cur_span_index, position):
 RawResult = collections.namedtuple("RawResult",
                                    ["unique_id", "start_logits", "end_logits"])
 
+
 def write_predictions(all_examples, all_features, all_results, n_best_size,
                       max_answer_length, do_lower_case,
                       verbose_logging,
                       version_2_with_negative, null_score_diff_threshold):
-    """Write final predictions to the json file and log-odds of null if needed."""
-
+    """Write final predictions to the json file and log-odds of null if needed.
+    遍历example/feature:
+        step1. 找到best_size index O(n)
+        step2. 得到【合法】的所有组合  O(k2)
+        step3. 从组合中生成nbest_size answer O(k)
+    """
 
     example_index_to_features = collections.defaultdict(list)
     for feature in all_features:
@@ -736,6 +741,7 @@ def write_predictions(all_examples, all_features, all_results, n_best_size,
     all_nbest_json = collections.OrderedDict()
     scores_diff_json = collections.OrderedDict()
 
+    # 此处实际上考虑到了一个example对应了多个feature的情况的
     for (example_index, example) in enumerate(all_examples):
         features = example_index_to_features[example_index]
 
