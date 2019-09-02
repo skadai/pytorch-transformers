@@ -2256,8 +2256,7 @@ class BertEcomCommentMultiPolarV4(BertPreTrainedModel):
                 opinion_mask = opinion_mask.resize(*opinion_mask.size(), 1)
                 opinion_mask = opinion_mask.repeat(1, 1, self.hidden_size)
                 opinion_states = torch.mean(seq_embeddings * opinion_mask, dim=1, keepdim=True)  # batch * 1 * hidden
-                kw_attention = self.kw_attention(opinion_states, seq_embeddings, attention_mask)[
-                    0]  # batch * 1 * hidden
+                kw_attention = self.kw_attention(opinion_states, seq_embeddings, attention_mask)[0]  # batch * 1 * hidden
                 kw_attention = kw_attention.squeeze(-2)
                 kw_attention = self.activation(kw_attention)
                 class_logits = self.classifier(kw_attention)  # batch * 1 * num_polar
@@ -2305,7 +2304,9 @@ class BertEcomCommentMultiPolarV4(BertPreTrainedModel):
             # mask * seq_out 然后取平均
             opinion_mask = opinion_mask.resize(*opinion_mask.size(), 1)
             opinion_mask = opinion_mask.repeat(1, 1, self.hidden_size)
-            opinion_states = torch.mean(sequence_output * opinion_mask, dim=1, keepdim=True)  # batch * 1 * hidden
+            temp = sequence_output * opinion_mask
+            opinion_states = torch.sum(temp, dim=1) / (temp != 0).sum(dim=1).float()
+            # opinion_states = torch.mean(sequence_output * opinion_mask, dim=1, keepdim=True)  # batch * 1 * hidden
             kw_attention = self.kw_attention(opinion_states, sequence_output, attention_mask)[0]  # batch * 1 * hidden
             kw_attention = kw_attention.squeeze(-2)
             kw_attention = self.activation(kw_attention)

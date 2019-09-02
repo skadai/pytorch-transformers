@@ -584,11 +584,11 @@ def convert_polar_examples_to_features(examples, label_list, max_seq_length,
 
         features.append(
                 InputPolarFeatures(input_ids=input_ids,
-                              input_mask=input_mask,
-                              segment_ids=segment_ids,
-                              label_id=label_id,
-                              question_id=question_id, # 26以后表示polar
-                              opinion_mask=opinion_mask))
+                                  input_mask=input_mask,
+                                  segment_ids=segment_ids,
+                                  label_id=label_id,
+                                  question_id=question_id, # 26以后表示polar
+                                  opinion_mask=opinion_mask))
     return features
 
 def convert_examples_to_features(examples, tokenizer, max_seq_length,

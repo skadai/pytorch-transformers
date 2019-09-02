@@ -45,7 +45,7 @@ from pytorch_transformers import AdamW, WarmupLinearSchedule
 
 
 from utils_glue import processors, compute_metrics
-from utils_skincare import (convert_examples_to_features,
+from utils_skincare_v2 import (convert_examples_to_features,
                                      RawResult, write_predictions, read_ecom_examples, convert_polar_examples_to_features,
                                      RawResultExtended, write_predictions_extended, acc_and_f1, TRANS_SUBTYPE)
 
