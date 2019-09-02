@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 class InputExample(object):
     """A single training/test example for simple sequence classification."""
 
-    def __init__(self, guid, text_a, text_b=None, label=None):
+    def __init__(self, guid, text_a, text_b=None, text_c=None, label=None):
         """Constructs a InputExample.
 
         Args:
@@ -47,6 +47,7 @@ class InputExample(object):
         self.guid = guid
         self.text_a = text_a
         self.text_b = text_b
+        self.text_c = text_c
         self.label = label
 
 
@@ -421,9 +422,10 @@ class EcomProcessor(DataProcessor):
                 text_a = line[0]
                 text_b = line[1]
                 label = line[2]
+                text_c = line[3]
 
             examples.append(
-                InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
+                InputExample(guid=guid, text_a=text_a, text_b=text_b, text_c=text_c, label=label))
         return examples
 
     @classmethod

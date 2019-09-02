@@ -284,16 +284,17 @@ class SubtypeAttention(nn.Module):
         self.dropout = nn.Dropout(config.attention_probs_dropout_prob)
 
     def transpose_for_scores(self, x):
-        new_x_shape = x.size()[:-1] + (self.num_attention_heads, self.attention_head_size)
+        new_x_shape = x.size()[:-1] + (self.num_attention_heads, self.attention_head_size) # batch * seq * 1 * hidden
         x = x.view(*new_x_shape)
-        return x.permute(0, 2, 1, 3)
+        return x.permute(0, 2, 1, 3)  # batch * 1 * seq * hidden
 
     def forward(self, subtype_states, hidden_states, attention_mask, head_mask=None):
         # hidden_states: batch * seq_len * hidden_size
         # subtype_states: batch * 1 * hiden_size
-        query_layer = self.transpose_for_scores(subtype_states)
-        key_layer = self.transpose_for_scores(hidden_states)
-        value_layer = self.transpose_for_scores(hidden_states)
+        # attention_mask: batch * seq_len
+        query_layer = self.transpose_for_scores(subtype_states) # batch * 1 * (?) * hidden
+        key_layer = self.transpose_for_scores(hidden_states)  # batch * 1 * seq * hidden
+        value_layer = self.transpose_for_scores(hidden_states) # batch * 1 * seq * hidden
 
         # We create a 3D attention mask from a 2D tensor mask.
         # Sizes are [batch_size, 1, 1, to_seq_length]
@@ -312,7 +313,7 @@ class SubtypeAttention(nn.Module):
 
 
         # Take the dot product between "query" and "key" to get the raw attention scores.
-        attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))
+        attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))  # batch * 1 * (?) * seq
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
         # Apply the attention mask is (precomputed for all layers in BertModel forward() function)
         attention_scores = attention_scores + extended_attention_mask  # batch * head * seq * seq
@@ -321,21 +322,21 @@ class SubtypeAttention(nn.Module):
 
         # This is actually dropping out entire tokens to attend to, which might
         # seem a bit unusual, but is taken from the original Transformer paper.
-        # attention_probs = self.dropout(attention_probs)  # batch * head * seq * 1
+        # attention_probs = self.dropout(attention_probs)  # batch * head * (?) * 1
 
         # Mask heads if we want to
         if head_mask is not None:
             attention_probs = attention_probs * head_mask
 
         # value_layer: batch * head * seq * hidden
-        context_layer = torch.matmul(attention_probs, value_layer)
+        context_layer = torch.matmul(attention_probs, value_layer) # batch * head * (?) * hidden
         # print('context layer size', context_layer.size())
-        context_layer = context_layer.permute(0, 2, 1, 3).contiguous() # batch * seq * head * head_size
+        context_layer = context_layer.permute(0, 2, 1, 3).contiguous() # batch * (?) * head * hidden
         new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
-        context_layer = context_layer.view(*new_context_layer_shape) # batch * seq * hidden
+        context_layer = context_layer.view(*new_context_layer_shape) # batch * (?) * hidden
         # context_layer = self.activation(context_layer)
         outputs = (context_layer, attention_probs) if self.output_attentions else (context_layer,)
-        return outputs  # batch * 1 * hidden_size
+        return outputs  # batch * (?) * hidden_size
 
 
 class BertSelfAttention(nn.Module):
@@ -1601,17 +1602,21 @@ class BertEcomCommentMultiV2(BertPreTrainedModel):
         super(BertEcomCommentMultiV2, self).__init__(config)
         self.num_labels = config.num_labels
         self.num_tasks = config.num_tasks
+        self.flag_idx = [7, 9]
+        self.strength = 2
         self.bert = BertModel(config)
         self.qa_outputs = nn.ModuleList()
         # 为每个subtype提供专门的全连接预测层
         for i in range(self.num_tasks):
             self.qa_outputs.append(nn.Linear(config.hidden_size, config.num_labels))  # num_labels =6
 
+
         self.apply(self.init_weights)
 
     def forward(self, input_ids, token_type_ids=None, attention_mask=None, start_positions=None,
                 end_positions=None, op_start_positions=None, op_end_positions=None, polar_start_positions=None,
-                polar_end_positions=None, position_ids=None, head_mask=None, question_ids=None, labels=None, kw_ids=None):
+                polar_end_positions=None, position_ids=None, head_mask=None, question_ids=None, labels=None, kw_ids=None,
+                polar_start_weights=None, polar_end_weights=None):
         outputs = self.bert(input_ids, position_ids=position_ids, token_type_ids=token_type_ids,
                             attention_mask=attention_mask, head_mask=head_mask)
         # outputs:
@@ -1677,8 +1682,12 @@ class BertEcomCommentMultiV2(BertPreTrainedModel):
             end_loss = loss_fct(end_logits, end_positions)
             op_start_loss = loss_fct(op_start_logits, op_start_positions)
             op_end_loss = loss_fct(op_end_logits, op_end_positions)
-            polar_start_loss = loss_fct(polar_start_logits, polar_start_positions)
-            polar_end_loss = loss_fct(polar_end_logits, polar_end_positions)
+
+            # TODO 关于polar的损失函数应单独定义
+            loss_polar_start_fct = CrossEntropyLoss(ignore_index=ignored_index, reduction="sum", weight=polar_start_weights)
+            polar_start_loss = loss_polar_start_fct(polar_start_logits, polar_start_positions)
+            loss_polar_end_fct = CrossEntropyLoss(ignore_index=ignored_index, reduction="sum", weight=polar_end_weights)
+            polar_end_loss = loss_polar_end_fct(polar_end_logits, polar_end_positions)
 
             total_loss = (start_loss + end_loss + op_start_loss + op_end_loss) / 4 + (polar_start_loss + polar_end_loss)/ 2
             # TODO loss 权重alpha如何处理
@@ -2120,4 +2129,189 @@ class BertEcomCommentMultiPolarV3(BertPreTrainedModel):
             class_loss_fct = CrossEntropyLoss()
             class_loss = class_loss_fct(class_logits.view(-1, self.num_polars), labels.view(-1))
             outputs = (class_loss,) + outputs
+        return outputs  # (loss), start_logits, end_logits, (hidden_states), (attentions)
+
+
+@add_start_docstrings("""Bert Model with a span classification head on top for extractive question-answering tasks like SQuAD (a linear layers on top of
+    the hidden-states output to compute `span start logits` and `span end logits`). """,
+                      BERT_START_DOCSTRING, BERT_INPUTS_DOCSTRING)
+class BertEcomCommentMultiPolarV4(BertPreTrainedModel):
+    r"""
+        bert encoder 输出和<情感词seqout>进行attention, 输出和进行全连接层的转换输出, 完全抛弃CLS,
+        共用一个classfier层, 以免多个subtype对其产生了影响
+        **start_positions**: (`optional`) ``torch.LongTensor`` of shape ``(batch_size,)``:
+            Labels for position (index) of the start of the labelled span for computing the token classification loss.
+            Positions are clamped to the length of the sequence (`sequence_length`).
+            Position outside of the sequence are not taken into account for computing the loss.
+        **end_positions**: (`optional`) ``torch.LongTensor`` of shape ``(batch_size,)``:
+            Labels for position (index) of the end of the labelled span for computing the token classification loss.
+            Positions are clamped to the length of the sequence (`sequence_length`).
+            Position outside of the sequence are not taken into account for computing the loss.
+
+    Outputs: `Tuple` comprising various elements depending on the configuration (config) and inputs:
+        **loss**: (`optional`, returned when ``labels`` is provided) ``torch.FloatTensor`` of shape ``(1,)``:
+            Total span extraction loss is the sum of a Cross-Entropy for the start and end positions.
+        **start_scores**: ``torch.FloatTensor`` of shape ``(batch_size, sequence_length,)``
+            Span-start scores (before SoftMax).
+        **end_scores**: ``torch.FloatTensor`` of shape ``(batch_size, sequence_length,)``
+            Span-end scores (before SoftMax).
+        **hidden_states**: (`optional`, returned when ``config.output_hidden_states=True``)
+            list of ``torch.FloatTensor`` (one for the output of each layer + the output of the embeddings)
+            of shape ``(batch_size, sequence_length, hidden_size)``:
+            Hidden-states of the model at the output of each layer plus the initial embedding outputs.
+        **attentions**: (`optional`, returned when ``config.output_attentions=True``)
+            list of ``torch.FloatTensor`` (one for each layer) of shape ``(batch_size, num_heads, sequence_length, sequence_length)``:
+            Attentions weights after the attention softmax, used to compute the weighted average in the self-attention heads.
+
+    Examples::
+
+        config = BertConfig.from_pretrained('bert-base-uncased')
+        tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+
+        model = BertEcomCommentExtraction(config)
+        input_ids = torch.tensor(tokenizer.encode("Hello, my dog is cute")).unsqueeze(0)  # Batch size 1
+        start_positions = torch.tensor([1])
+        end_positions = torch.tensor([3])
+        outputs = model(input_ids, start_positions=start_positions, end_positions=end_positions)
+        loss, start_scores, end_scores = outputs[:2]
+
+    """
+
+    def __init__(self, config):
+        super(BertEcomCommentMultiPolarV4, self).__init__(config)
+        self.num_labels = config.num_labels
+        self.num_polars = config.num_polars
+        self.num_tasks = config.num_tasks # 表示模型后端多少个subtype的特征/情感极性预测任务
+        self.hidden_size = config.hidden_size
+
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+        self.bert = BertModel(config)
+        self.kw_attention = SubtypeAttention(config)
+        self.qa_outputs = nn.ModuleList()
+        self.classifier = nn.Linear(config.hidden_size, self.num_polars)
+        self.activation = nn.Tanh()
+
+        # 为每个subtype提供专门的全连接预测层
+        for i in range(self.num_tasks):
+            self.qa_outputs.append(nn.Linear(config.hidden_size, config.num_labels))
+
+        self.apply(self.init_weights)
+
+    def forward(self, input_ids, token_type_ids=None, attention_mask=None, start_positions=None,
+                end_positions=None, op_start_positions=None, op_end_positions=None,
+                position_ids=None, head_mask=None, question_ids=None, labels=None, kw_ids=None, opinion_mask=None,
+                seq_embeddings=None):
+        """
+
+        :param input_ids:
+        :param token_type_ids:
+        :param attention_mask:
+        :param start_positions:
+        :param end_positions:
+        :param op_start_positions:
+        :param op_end_positions:
+        :param position_ids:
+        :param head_mask:
+        :param question_ids:
+        :param labels:
+        :param kw_ids:  用于关键词attention用 (废弃)
+        :param opinion_mask: 极性训练需要, 标记情感词在句子中所出现的位置用 batch * seq * 1
+        :return:
+        """
+        outputs = self.bert(input_ids, position_ids=position_ids, token_type_ids=token_type_ids,
+                            attention_mask=attention_mask, head_mask=head_mask)
+        # outputs:
+        sequence_output = outputs[0]  # batch * seq_length * hidden_size
+        question_id = question_ids[0].item()
+        #
+        # subtype_states = self.bert.embeddings(kw_ids)  # batch * seq * hidden
+        # subtype_states = torch.mean(subtype_states, dim=1, keepdim=True)  # batch * 1 * hidden
+        # print('subtype_state size', subtype_states.size())
+        pooled_output = outputs[1]
+        pooled_output = self.dropout(pooled_output)
+
+        if question_id == -1:
+            ## 只为多任务预测时使用
+            print('predict all subtypes...')
+            if opinion_mask is None:
+                # 先预测特征词和情感词的事情
+                start_logits_list, end_logits_list, op_start_logits_list, op_end_logits_list, class_logits_list = [], [], [], [], []
+                for i in range(self.num_tasks):
+                    # TOD 这里考虑矩阵拼接直接处理了, 便于GPU batchsize处理
+                    output_layor = self.qa_outputs[i]
+                    classifier_layor = self.classifiers[i]
+                    class_logits = classifier_layor(pooled_output)
+                    logits = output_layor(sequence_output)
+
+                    start_logits, end_logits, op_start_logits, op_end_logits = logits.split(1, dim=-1)
+                    start_logits_list.append(start_logits.squeeze(-1))
+                    end_logits_list.append(end_logits.squeeze(-1))
+                    op_start_logits_list.append(op_start_logits.squeeze(-1))
+                    op_end_logits_list.append(op_end_logits.squeeze(-1))
+                    op_end_logits_list.append(class_logits)
+                return (start_logits_list, end_logits_list, op_start_logits_list,
+                        op_end_logits_list, sequence_output) + outputs[2:]
+            else:
+                # 根据opinion_mask来预测情感极性, 此时应该输入seqembedding.
+                opinion_mask = opinion_mask.resize(*opinion_mask.size(), 1)
+                opinion_mask = opinion_mask.repeat(1, 1, self.hidden_size)
+                opinion_states = torch.mean(seq_embeddings * opinion_mask, dim=1, keepdim=True)  # batch * 1 * hidden
+                kw_attention = self.kw_attention(opinion_states, seq_embeddings, attention_mask)[
+                    0]  # batch * 1 * hidden
+                kw_attention = kw_attention.squeeze(-2)
+                kw_attention = self.activation(kw_attention)
+                class_logits = self.classifier(kw_attention)  # batch * 1 * num_polar
+                return (class_logits) + outputs[2:]
+
+        output_layor = self.qa_outputs[question_id % self.num_tasks]
+
+        logits = output_layor(sequence_output)  # batch * seq_length * num_labels
+        start_logits, end_logits, op_start_logits, op_end_logits = logits.split(1, dim=-1)  # batch * seq_length * 1
+        start_logits = start_logits.squeeze(-1)  # batch * seq_length
+        end_logits = end_logits.squeeze(-1)
+        op_start_logits = op_start_logits.squeeze(-1)
+        op_end_logits = op_end_logits.squeeze(-1)
+        # sequence_output, pooled_output, (hidden_states), (attentions)
+        outputs = (start_logits, end_logits, op_start_logits, op_end_logits) + outputs[2:]
+        if start_positions is not None and end_positions is not None:
+            # If we are on multi-GPU, split add a dimension
+            if len(start_positions.size()) > 1:
+                start_positions = start_positions.squeeze(-1)
+            if len(end_positions.size()) > 1:
+                end_positions = end_positions.squeeze(-1)
+            if len(op_start_positions.size()) > 1:
+                op_start_positions = op_start_positions.squeeze(-1)
+            if len(op_end_positions.size()) > 1:
+                op_end_positions = op_end_positions.squeeze(-1)
+
+            # sometimes the start/end positions are outside our model inputs, we ignore these terms
+            ignored_index = start_logits.size(1)
+
+            start_positions.clamp_(0, ignored_index)
+            end_positions.clamp_(0, ignored_index)
+            op_start_positions.clamp_(0, ignored_index)
+            op_end_positions.clamp_(0, ignored_index)
+
+            loss_fct = CrossEntropyLoss(ignore_index=ignored_index)
+            start_loss = loss_fct(start_logits, start_positions)
+            end_loss = loss_fct(end_logits, end_positions)
+            op_start_loss = loss_fct(op_start_logits, op_start_positions)
+            op_end_loss = loss_fct(op_end_logits, op_end_positions)
+
+            total_loss = (start_loss + end_loss + op_start_loss + op_end_loss) / 4
+            outputs = (total_loss,) + outputs
+        elif labels is not None:
+            # 利用 op_star_position, op_end_position 生成 mask   # batch * seq * hidden
+            # mask * seq_out 然后取平均
+            opinion_mask = opinion_mask.resize(*opinion_mask.size(), 1)
+            opinion_mask = opinion_mask.repeat(1, 1, self.hidden_size)
+            opinion_states = torch.mean(sequence_output * opinion_mask, dim=1, keepdim=True)  # batch * 1 * hidden
+            kw_attention = self.kw_attention(opinion_states, sequence_output, attention_mask)[0]  # batch * 1 * hidden
+            kw_attention = kw_attention.squeeze(-2)
+            kw_attention = self.activation(kw_attention)
+            class_logits = self.classifier(kw_attention)  # batch * 1 * num_polar
+
+            class_loss_fct = CrossEntropyLoss()
+            class_loss = class_loss_fct(class_logits.view(-1, self.num_polars), labels.view(-1))
+            outputs = (class_loss, class_logits) + outputs
         return outputs  # (loss), start_logits, end_logits, (hidden_states), (attentions)

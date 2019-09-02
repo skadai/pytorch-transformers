@@ -15,7 +15,8 @@ from .modeling_bert import (BertConfig, BertPreTrainedModel, BertModel, BertForP
                             BertForSequenceClassification, BertForMultipleChoice,
                             BertForTokenClassification, BertForQuestionAnswering,
                             BertEcomCommentExtraction, BertEcomCommentMulti, BertEcomCommentMultiV2,
-                            BertEcomCommentMultiPolar, BertEcomCommentMultiPolarV2, BertEcomCommentMultiPolarV3,
+                            BertEcomCommentMultiPolar, BertEcomCommentMultiPolarV2,
+                            BertEcomCommentMultiPolarV3, BertEcomCommentMultiPolarV4,
                             load_tf_weights_in_bert, BERT_PRETRAINED_MODEL_ARCHIVE_MAP,
                             BERT_PRETRAINED_CONFIG_ARCHIVE_MAP)
 from .modeling_openai import (OpenAIGPTConfig, OpenAIGPTPreTrainedModel, OpenAIGPTModel,

@@ -115,12 +115,13 @@ class SquadExample(object):
 class InputPolarFeatures(object):
     """A single set of features of data."""
 
-    def __init__(self, input_ids, input_mask, segment_ids, label_id, question_id):
+    def __init__(self, input_ids, input_mask, segment_ids, label_id, question_id, opinion_mask):
         self.input_ids = input_ids
         self.input_mask = input_mask
         self.segment_ids = segment_ids
         self.label_id = label_id
         self.question_id = question_id
+        self.opinion_mask = opinion_mask
 
 
 class InputFeatures(object):
@@ -256,7 +257,6 @@ def read_ecom_examples(input_file, is_training, subtype, start_idx = 0):
         return False
 
     examples = []
-
     polarity_term_dict = {
         1: '负面',
         3: '中性',
@@ -265,7 +265,119 @@ def read_ecom_examples(input_file, is_training, subtype, start_idx = 0):
     input_data = load_dat(input_file)
     target_subtype = subtype.replace('_', ' ').replace('.', '/')
     for idx, entry in enumerate(input_data):
-        doc_tokens = '正面/负面/中性/' + convert_text(entry['text'])
+        # doc_tokens = '正面/负面/中性/' + convert_text(entry['text'])
+        doc_tokens = convert_text(entry['text'])
+        for op in entry['opinions']:
+            if op['aspectSubtype'] == target_subtype:
+                aspect_terms = op['aspectTerm']
+                polarity = op['polarity']
+                polarity_term = polarity_term_dict[polarity]
+                if is_training:
+                    start, end = find_positions(doc_tokens, aspect_terms)
+                    if start != -2:
+                        opinion_terms = op['opinionTerm']
+                        op_start, op_end = find_positions(doc_tokens, opinion_terms)
+                        polar_start, polar_end = find_positions(doc_tokens, [polarity_term])
+                        orig_answer_text = doc_tokens[start:end]
+                        if op_start != -2:
+                            example = SquadExample(
+                                qas_id=str(start_idx + idx),
+                                question_text=TRANS_SUBTYPE[target_subtype],
+                                doc_tokens=doc_tokens,
+                                orig_answer_text=orig_answer_text,
+                                op_answer_text=doc_tokens[op_start:op_end],
+                                polar_answer_text=doc_tokens[polar_start:polar_end],
+                                start_position=start,
+                                end_position=end-1,
+                                op_start_postion=op_start,
+                                op_end_postition=op_end-1,
+                                polar_start_position=polar_start,
+                                polar_end_position=polar_end-1,
+                                is_impossible=False,
+                                is_op_impossible=False,
+                                label=polarity)
+                        else:
+                            example = SquadExample(
+                                qas_id=str(start_idx + idx),
+                                question_text=TRANS_SUBTYPE[target_subtype],
+                                doc_tokens=doc_tokens,
+                                orig_answer_text=orig_answer_text,
+                                op_answer_text='',
+                                polar_answer_text=doc_tokens[polar_start:polar_end],
+                                start_position=start,
+                                end_position=end - 1,
+                                op_start_postion=-100,
+                                op_end_postition=-100,
+                                polar_start_position=polar_start,
+                                polar_end_position=polar_end - 1,
+                                is_impossible=False,
+                                is_op_impossible=True,
+                                label=polarity)
+                        examples.append(example)
+                else:
+                    example = SquadExample(
+                        qas_id=str(start_idx + idx),
+                        question_text=TRANS_SUBTYPE[target_subtype],
+                        doc_tokens=doc_tokens,  # 分词的结果
+                        orig_answer_text='',  # 原始答案
+                        op_answer_text='',
+                        polar_answer_text='',
+                        start_position=-100,  # 这里position是单词的位置
+                        end_position=-100,
+                        op_start_postion=-100,
+                        op_end_postition=-100,
+                        polar_start_position=-100,
+                        polar_end_position=-100,
+                        is_impossible=False,
+                        is_op_impossible=False,
+                        label=polarity)
+                    examples.append(example)
+
+                break
+
+        else:
+            # 如果所有 opinion 都 scan 一遍还是找不到, 那就是一个不可回答的问题
+            example = SquadExample(
+                qas_id=str(start_idx + idx),
+                question_text=TRANS_SUBTYPE[target_subtype],
+                doc_tokens=doc_tokens,  # 分词的结果
+                orig_answer_text='',  # 原始答案
+                op_answer_text='',
+                polar_answer_text='',
+                start_position=-1,  # 这里position是单词的位置
+                end_position=-1,
+                op_start_postion=-1,
+                op_end_postition=-1,
+                polar_start_position=-1,
+                polar_end_position=-1,
+                is_impossible=True,
+                is_op_impossible=True,
+                label=3)
+            examples.append(example)
+
+    # print(f'共读取examples {len(examples)}')
+    return examples
+
+
+def read_ecom_polar_examples(input_file, is_training, subtype, start_idx = 0):
+    """
+    :param input_file: 电商评论json文件
+    :param is_training:
+    :param subtype: 目标subtype(非必要的？)
+    :param start_idx: 情感词
+    :return 用于情感词训练的样本, opinion_mask, polarity 模型将opinion mask乘以seq out, 结果取平均作为kw和seq output进行attention运算
+            最终得出的结果进行polarity分类
+    """
+    examples = []
+    polarity_term_dict = {
+        1: '负面',
+        3: '中性',
+        5: '正面'
+    }
+    input_data = load_dat(input_file)
+    target_subtype = subtype.replace('_', ' ').replace('.', '/')
+    for idx, entry in enumerate(input_data):
+        doc_tokens = convert_text(entry['text'])
         for op in entry['opinions']:
             if op['aspectSubtype'] == target_subtype:
                 aspect_terms = op['aspectTerm']
@@ -359,7 +471,7 @@ def read_ecom_examples(input_file, is_training, subtype, start_idx = 0):
 
 
 def convert_polar_examples_to_features(examples, label_list, max_seq_length,
-                                 tokenizer, output_mode,
+                                 tokenizer, output_mode, num_tasks,
                                  cls_token_at_end=False, pad_on_left=False,
                                  cls_token='[CLS]', sep_token='[SEP]', pad_token=0,
                                  sequence_a_segment_id=0, sequence_b_segment_id=1,
@@ -380,8 +492,8 @@ def convert_polar_examples_to_features(examples, label_list, max_seq_length,
         if ex_index % 10000 == 0:
             logger.info("Writing example %d of %d" % (ex_index, len(examples)))
 
-        question_id = question_ids.index(example.text_a) + 26 # polar 训练编号从26开始
-        tokens_a = tokenizer.tokenize("维度")  # TODO 此处统一带来何种影响呢
+        question_id = question_ids.index(example.text_c) + num_tasks # polar 训练编号从 num_task 开始
+        tokens_a = tokenizer.tokenize("维度")
 
         tokens_b = None
         if example.text_b:
@@ -448,12 +560,16 @@ def convert_polar_examples_to_features(examples, label_list, max_seq_length,
         assert len(input_mask) == max_seq_length
         assert len(segment_ids) == max_seq_length
 
-        if output_mode == "classification":
-            label_id = label_map[example.label]
-        elif output_mode == "regression":
-            label_id = float(example.label)
+        opinion_mask = [0] * max_seq_length
+        op_start, op_end = find_positions(example.text_b, [example.text_a])
+
+        if op_start == -2 or op_start > max_seq_length - 5:
+            opinion_mask[0] = 1
         else:
-            raise KeyError(output_mode)
+            for i in range(op_start, op_end):
+                opinion_mask[min(i+4, max_seq_length-1)] = 1
+
+        label_id = label_map[example.label]
 
         if ex_index < 3:
             logger.info("*** POLAR Example ***")
@@ -464,13 +580,15 @@ def convert_polar_examples_to_features(examples, label_list, max_seq_length,
             logger.info("input_mask: %s" % " ".join([str(x) for x in input_mask]))
             logger.info("segment_ids: %s" % " ".join([str(x) for x in segment_ids]))
             logger.info("label: %s (id = %d)" % (example.label, label_id))
+            logger.info("opinion_mask: %s" % " ".join([str(x) for x in opinion_mask]))
 
         features.append(
                 InputPolarFeatures(input_ids=input_ids,
                               input_mask=input_mask,
                               segment_ids=segment_ids,
                               label_id=label_id,
-                              question_id=question_id)) # 26以后表示polar
+                              question_id=question_id, # 26以后表示polar
+                              opinion_mask=opinion_mask))
     return features
 
 def convert_examples_to_features(examples, tokenizer, max_seq_length,
@@ -498,8 +616,7 @@ def convert_examples_to_features(examples, tokenizer, max_seq_length,
         #     logger.info('Converting %s/%s pos %s neg %s', example_index, len(examples), cnt_pos, cnt_neg)
 
         # query_tokens = tokenizer.tokenize(example.question_text)
-        query_tokens = tokenizer.tokenize("")
-
+        query_tokens = tokenizer.tokenize("维度")
         if len(query_tokens) > max_query_length:
             query_tokens = query_tokens[0:max_query_length]
 

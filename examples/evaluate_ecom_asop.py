@@ -319,10 +319,10 @@ def main():
     prefix = f'{OPTS.score_type}_'
     if prefix == 'aspect_':
         prefix = ""
-    pred_file_path = f'{data_dir}_out/all_in_one_bert_ep10/checkpoint-3000/{OPTS.pred_dir}/{prefix}predictions_.json'
+    pred_file_path = f'{data_dir}_out/all_in_one/{OPTS.pred_dir}/{prefix}predictions_.json'
 
     data_file_path = f'{data_dir}/{OPTS.pred_dir}/dev.json'
-    na_prob_file_path = f'{data_dir}_out/all_in_one_bert_ep10/checkpoint-3000/{OPTS.pred_dir}/{prefix}null_odds_.json'
+    na_prob_file_path = f'{data_dir}_out/all_in_one/{OPTS.pred_dir}/{prefix}null_odds_.json'
     if OPTS.multi:
         flag = f'{prefix}multi'
         dataset = read_multi_examples(data_dir, is_training=True, filename='dev.json')

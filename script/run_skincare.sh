@@ -6,7 +6,7 @@ SUBTYPE=$1
 TASK_NAME=$2
 
 export GLUE_DIR=/data/projects/bert_pytorch/
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=1
 export SQUAD_DIR=$GLUE_DIR/${TASK_NAME}/$SUBTYPE
 
 
@@ -22,16 +22,16 @@ python ../examples/run_skincare.py \
     --train_file $SQUAD_DIR/train.json \
     --predict_file $SQUAD_DIR/dev.json \
     --learning_rate 2e-5 \
-    --num_train_epochs 10 \
+    --num_train_epochs 6 \
     --adam_epsilon 1e-6 \
     --max_seq_length 256 \
     --max_answer_length 20 \
     --save_steps 600 \
     --weight_decay 0.01 \
-    --fp16 \
     --doc_stride 128 \
     --output_dir $GLUE_DIR/${TASK_NAME}_out/$SUBTYPE \
     --per_gpu_eval_batch_size=32   \
     --per_gpu_train_batch_size=16   \
     --version_2_with_negative \
     --overwrite_output_dir \
+    --overwrite_cache

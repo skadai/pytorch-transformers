@@ -9,12 +9,13 @@ export CUDA_VISIBLE_DEVICES=0
 export SQUAD_DIR=$GLUE_DIR/${TASK_NAME}/$SUBTYPE
 export MODEL_DIR=$GLUE_DIR/${TASK_NAME}_out/$3
 
-python ../examples/run_skincare.py \
-    --model_type multi_v2 \
+python ../examples/run_skincare_v2.py \
+    --model_type multi_v3 \
     --model_name_or_path $MODEL_DIR/pytorch_model.bin \
-    --config_name $GLUE_DIR/config.json \
+    --config_name $GLUE_DIR/$TASK_NAME/config.json \
     --tokenizer_name  $GLUE_DIR/vocab.txt \
     --do_eval \
+    --polar \
     --do_lower_case \
     --multi_subtype_dir $GLUE_DIR/${TASK_NAME} \
     --ecom_subtype $SUBTYPE  \
