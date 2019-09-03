@@ -34,6 +34,8 @@ def parse_args():
     parser.add_argument('pred_dir', metavar='pred_dir', help='Model predictions.')
     parser.add_argument('--data-filename', '-d', metavar='data_filename', help='Input data JSON file.')
     parser.add_argument('--task-name', '-tn', help='task name')
+    parser.add_argument('--runs_name', '-rn', help='runs name')
+
     parser.add_argument('--out-file', '-o', metavar='eval.json',
                         help='Write accuracy metrics to file (default is stdout).')
     parser.add_argument('--na-prob-file', '-n', metavar='na_prob.json',
@@ -319,10 +321,10 @@ def main():
     prefix = f'{OPTS.score_type}_'
     if prefix == 'aspect_':
         prefix = ""
-    pred_file_path = f'{data_dir}_out/all_in_one/{OPTS.pred_dir}/{prefix}predictions_.json'
+    pred_file_path = f'{data_dir}_out/{OPTS.runs_name}/{OPTS.pred_dir}/{prefix}predictions_.json'
 
     data_file_path = f'{data_dir}/{OPTS.pred_dir}/dev.json'
-    na_prob_file_path = f'{data_dir}_out/all_in_one/{OPTS.pred_dir}/{prefix}null_odds_.json'
+    na_prob_file_path = f'{data_dir}_out/{OPTS.runs_name}/{OPTS.pred_dir}/{prefix}null_odds_.json'
     if OPTS.multi:
         flag = f'{prefix}multi'
         dataset = read_multi_examples(data_dir, is_training=True, filename='dev.json')

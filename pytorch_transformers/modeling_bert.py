@@ -1685,9 +1685,9 @@ class BertEcomCommentMultiV2(BertPreTrainedModel):
 
             # TODO 关于polar的损失函数应单独定义
             loss_polar_start_fct = CrossEntropyLoss(ignore_index=ignored_index, reduction="sum", weight=polar_start_weights)
-            polar_start_loss = loss_polar_start_fct(polar_start_logits, polar_start_positions)
+            polar_start_loss = loss_fct(polar_start_logits, polar_start_positions)
             loss_polar_end_fct = CrossEntropyLoss(ignore_index=ignored_index, reduction="sum", weight=polar_end_weights)
-            polar_end_loss = loss_polar_end_fct(polar_end_logits, polar_end_positions)
+            polar_end_loss = loss_fct(polar_end_logits, polar_end_positions)
 
             total_loss = (start_loss + end_loss + op_start_loss + op_end_loss) / 4 + (polar_start_loss + polar_end_loss)/ 2
             # TODO loss 权重alpha如何处理
@@ -2218,50 +2218,60 @@ class BertEcomCommentMultiPolarV4(BertPreTrainedModel):
         :param opinion_mask: 极性训练需要, 标记情感词在句子中所出现的位置用 batch * seq * 1
         :return:
         """
-        outputs = self.bert(input_ids, position_ids=position_ids, token_type_ids=token_type_ids,
-                            attention_mask=attention_mask, head_mask=head_mask)
-        # outputs:
-        sequence_output = outputs[0]  # batch * seq_length * hidden_size
+
         question_id = question_ids[0].item()
         #
         # subtype_states = self.bert.embeddings(kw_ids)  # batch * seq * hidden
         # subtype_states = torch.mean(subtype_states, dim=1, keepdim=True)  # batch * 1 * hidden
         # print('subtype_state size', subtype_states.size())
-        pooled_output = outputs[1]
-        pooled_output = self.dropout(pooled_output)
 
         if question_id == -1:
             ## 只为多任务预测时使用
-            print('predict all subtypes...')
-            if opinion_mask is None:
-                # 先预测特征词和情感词的事情
-                start_logits_list, end_logits_list, op_start_logits_list, op_end_logits_list, class_logits_list = [], [], [], [], []
-                for i in range(self.num_tasks):
-                    # TOD 这里考虑矩阵拼接直接处理了, 便于GPU batchsize处理
-                    output_layor = self.qa_outputs[i]
-                    classifier_layor = self.classifiers[i]
-                    class_logits = classifier_layor(pooled_output)
-                    logits = output_layor(sequence_output)
 
-                    start_logits, end_logits, op_start_logits, op_end_logits = logits.split(1, dim=-1)
-                    start_logits_list.append(start_logits.squeeze(-1))
-                    end_logits_list.append(end_logits.squeeze(-1))
-                    op_start_logits_list.append(op_start_logits.squeeze(-1))
-                    op_end_logits_list.append(op_end_logits.squeeze(-1))
-                    op_end_logits_list.append(class_logits)
-                return (start_logits_list, end_logits_list, op_start_logits_list,
-                        op_end_logits_list, sequence_output) + outputs[2:]
+            # print('predict all subtypes...')
+            if opinion_mask is None:
+                outputs = self.bert(input_ids, position_ids=position_ids, token_type_ids=token_type_ids,
+                                    attention_mask=attention_mask, head_mask=head_mask)
+                # outputs:
+                sequence_output = outputs[0]  # batch * seq_length * hidden_size
+                # 先预测特征词和情感词
+                w = torch.cat([i.weight for i in self.qa_outputs], dim=0)  # hidden_size * (num_labels * 26)
+                b = torch.cat([i.bias for i in self.qa_outputs], dim=0)
+                temp = F.linear(sequence_output, w, b)  # batch * seq_length * (num_labels * 26)
+                temps = temp.split(1, dim=-1)
+                # print('temp size', len(temps))  # (num_labels * 26) * [batch * seq * 1]
+                temps = [i.squeeze(-1) for i in temps]
+                start_logits_list = temps[0::self.num_labels]
+                end_logits_list = temps[1::self.num_labels]
+                op_start_logits_list = temps[2::self.num_labels]
+                op_end_logits_list = temps[3::self.num_labels]
+
+                return (start_logits_list, end_logits_list,
+                        op_start_logits_list, op_end_logits_list,
+                        sequence_output) + outputs[2:]
+
             else:
-                # 根据opinion_mask来预测情感极性, 此时应该输入seqembedding.
-                opinion_mask = opinion_mask.resize(*opinion_mask.size(), 1)
+                # 根据opinion_mask来预测情感极性, 此时应该输入seq_embedding.
+                # print('attention_mask', attention_mask.size())
+                opinion_mask.resize_(*opinion_mask.size(), 1)
                 opinion_mask = opinion_mask.repeat(1, 1, self.hidden_size)
-                opinion_states = torch.mean(seq_embeddings * opinion_mask, dim=1, keepdim=True)  # batch * 1 * hidden
+                temp = seq_embeddings * opinion_mask
+                opinion_states = torch.sum(temp, dim=1) / (temp != 0).sum(dim=1).float()
+                opinion_states = opinion_states.unsqueeze(1)
+                #             print('opinion_state size', opinion_states.size()) # 16 * 1 * 768
+                # opinion_states = torch.mean(sequence_output * opinion_mask, dim=1, keepdim=True)  # batch * 1 * hidden
                 kw_attention = self.kw_attention(opinion_states, seq_embeddings, attention_mask)[0]  # batch * 1 * hidden
                 kw_attention = kw_attention.squeeze(-2)
                 kw_attention = self.activation(kw_attention)
                 class_logits = self.classifier(kw_attention)  # batch * 1 * num_polar
-                return (class_logits) + outputs[2:]
 
+
+                return (class_logits)
+
+        outputs = self.bert(input_ids, position_ids=position_ids, token_type_ids=token_type_ids,
+                            attention_mask=attention_mask, head_mask=head_mask)
+        # outputs:
+        sequence_output = outputs[0]  # batch * seq_length * hidden_size
         output_layor = self.qa_outputs[question_id % self.num_tasks]
 
         logits = output_layor(sequence_output)  # batch * seq_length * num_labels
@@ -2297,15 +2307,18 @@ class BertEcomCommentMultiPolarV4(BertPreTrainedModel):
             op_start_loss = loss_fct(op_start_logits, op_start_positions)
             op_end_loss = loss_fct(op_end_logits, op_end_positions)
 
-            total_loss = (start_loss + end_loss + op_start_loss + op_end_loss) / 4
+            total_loss = (start_loss + end_loss + op_start_loss + op_end_loss) / 2
             outputs = (total_loss,) + outputs
         elif labels is not None:
             # 利用 op_star_position, op_end_position 生成 mask   # batch * seq * hidden
             # mask * seq_out 然后取平均
-            opinion_mask = opinion_mask.resize(*opinion_mask.size(), 1)
+            opinion_mask.resize_(*opinion_mask.size(), 1)
             opinion_mask = opinion_mask.repeat(1, 1, self.hidden_size)
             temp = sequence_output * opinion_mask
+            # print('seq out size', sequence_output.size())
             opinion_states = torch.sum(temp, dim=1) / (temp != 0).sum(dim=1).float()
+            opinion_states = opinion_states.unsqueeze(1)
+#             print('opinion_state size', opinion_states.size()) # 16 * 1 * 768
             # opinion_states = torch.mean(sequence_output * opinion_mask, dim=1, keepdim=True)  # batch * 1 * hidden
             kw_attention = self.kw_attention(opinion_states, sequence_output, attention_mask)[0]  # batch * 1 * hidden
             kw_attention = kw_attention.squeeze(-2)
@@ -2314,5 +2327,5 @@ class BertEcomCommentMultiPolarV4(BertPreTrainedModel):
 
             class_loss_fct = CrossEntropyLoss()
             class_loss = class_loss_fct(class_logits.view(-1, self.num_polars), labels.view(-1))
-            outputs = (class_loss, class_logits) + outputs
+            outputs = (class_loss, class_logits, sequence_output) + outputs
         return outputs  # (loss), start_logits, end_logits, (hidden_states), (attentions)

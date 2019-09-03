@@ -341,6 +341,12 @@ def evaluate_polar(args, model, tokenizer, prefix="",label_list=["1", "3", "5"],
         results.update(result)
 
         output_eval_file = os.path.join(eval_output_dir, "eval_results.txt")
+        raw_eval_file = os.path.join(eval_output_dir, 'eval_raw.csv')
+        with open(raw_eval_file, 'w') as writer:
+            logger.info("***** raw eval results {} *****".format(prefix))
+            for m, n in zip(preds, out_label_ids):
+                writer.write(f"{m},{n} \n")
+
         with open(output_eval_file, "w") as writer:
             logger.info("***** Eval results {} *****".format(prefix))
             for key in sorted(result.keys()):
@@ -757,7 +763,6 @@ def main():
     config_class, model_class, tokenizer_class = MODEL_CLASSES[args.model_type]
     config = config_class.from_pretrained(args.config_name if args.config_name else args.model_name_or_path)
 
-    ## 强制 num_labels = 4
     label_list = ["1", "3", "5"]
     tokenizer = tokenizer_class.from_pretrained(args.tokenizer_name if args.tokenizer_name else args.model_name_or_path, do_lower_case=args.do_lower_case)
     model = model_class.from_pretrained(args.model_name_or_path, from_tf=bool('.ckpt' in args.model_name_or_path), config=config)
