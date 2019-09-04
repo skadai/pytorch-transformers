@@ -39,11 +39,6 @@ from data_preprocess import convert_text
 logger = logging.getLogger(__name__)
 
 
-
-SUBTYPE_DICT = json.load(open(os.path.join(os.path.dirname(__file__), 'SUBTYPE.json'), 'r'))
-TRANS_SUBTYPE = SUBTYPE_DICT['skincare']
-
-
 class SquadExample(object):
     """
     A single training/test example for the Squad dataset.
@@ -219,7 +214,7 @@ def load_dat(fpath):
         return dat
 
 
-def read_multi_examples(data_dir, is_training=True, filename='train.json'):
+def read_multi_examples(data_dir, is_training=True, filename='train.json', trans_subtype=None):
     """
     读取多个subtype的数据
     :param data_dir:
@@ -235,12 +230,13 @@ def read_multi_examples(data_dir, is_training=True, filename='train.json'):
         if os.path.isdir(dirpath):
             data_file = os.path.join(dirpath, data_file_name)
             subtype_en = filename.replace('.', '/').replace('_', ' ')
-            if subtype_en in TRANS_SUBTYPE:
+            if subtype_en in trans_subtype:
                 rets = read_ecom_examples(
                     input_file=data_file,
                     is_training=is_training,
                     subtype=subtype_en,
-                    start_idx=start_idx)
+                    start_idx=start_idx,
+                    trans_subtype=trans_subtype)
 
                 start_idx = 1 + int(rets[-1].qas_id)
                 examples.extend(rets)
@@ -249,7 +245,7 @@ def read_multi_examples(data_dir, is_training=True, filename='train.json'):
     return random.sample(examples, len(examples))
 
 
-def read_ecom_examples(input_file, is_training, subtype, start_idx = 0):
+def read_ecom_examples(input_file, is_training, subtype, start_idx=0, trans_subtype=None):
     """Read a ecom json file into a list of SquadExample."""
     def is_whitespace(c):
         if c == " " or c == "\t" or c == "\r" or c == "\n" or ord(c) == 0x202F:
@@ -282,7 +278,7 @@ def read_ecom_examples(input_file, is_training, subtype, start_idx = 0):
                         if op_start != -2:
                             example = SquadExample(
                                 qas_id=str(start_idx + idx),
-                                question_text=TRANS_SUBTYPE[target_subtype],
+                                question_text=trans_subtype[target_subtype],
                                 doc_tokens=doc_tokens,
                                 orig_answer_text=orig_answer_text,
                                 op_answer_text=doc_tokens[op_start:op_end],
@@ -299,7 +295,7 @@ def read_ecom_examples(input_file, is_training, subtype, start_idx = 0):
                         else:
                             example = SquadExample(
                                 qas_id=str(start_idx + idx),
-                                question_text=TRANS_SUBTYPE[target_subtype],
+                                question_text=trans_subtype[target_subtype],
                                 doc_tokens=doc_tokens,
                                 orig_answer_text=orig_answer_text,
                                 op_answer_text='',
@@ -317,7 +313,7 @@ def read_ecom_examples(input_file, is_training, subtype, start_idx = 0):
                 else:
                     example = SquadExample(
                         qas_id=str(start_idx + idx),
-                        question_text=TRANS_SUBTYPE[target_subtype],
+                        question_text=trans_subtype[target_subtype],
                         doc_tokens=doc_tokens,  # 分词的结果
                         orig_answer_text='',  # 原始答案
                         op_answer_text='',
@@ -339,7 +335,7 @@ def read_ecom_examples(input_file, is_training, subtype, start_idx = 0):
             # 如果所有 opinion 都 scan 一遍还是找不到, 那就是一个不可回答的问题
             example = SquadExample(
                 qas_id=str(start_idx + idx),
-                question_text=TRANS_SUBTYPE[target_subtype],
+                question_text=trans_subtype[target_subtype],
                 doc_tokens=doc_tokens,  # 分词的结果
                 orig_answer_text='',  # 原始答案
                 op_answer_text='',
@@ -359,7 +355,7 @@ def read_ecom_examples(input_file, is_training, subtype, start_idx = 0):
     return examples
 
 
-def read_ecom_polar_examples(input_file, is_training, subtype, start_idx = 0):
+def read_ecom_polar_examples(input_file, is_training, subtype, start_idx = 0, trans_subtype=None):
     """
     :param input_file: 电商评论json文件
     :param is_training:
@@ -393,7 +389,7 @@ def read_ecom_polar_examples(input_file, is_training, subtype, start_idx = 0):
                         if op_start != -2:
                             example = SquadExample(
                                 qas_id=str(start_idx + idx),
-                                question_text=TRANS_SUBTYPE[target_subtype],
+                                question_text=trans_subtype[target_subtype],
                                 doc_tokens=doc_tokens,
                                 orig_answer_text=orig_answer_text,
                                 op_answer_text=doc_tokens[op_start:op_end],
@@ -410,7 +406,7 @@ def read_ecom_polar_examples(input_file, is_training, subtype, start_idx = 0):
                         else:
                             example = SquadExample(
                                 qas_id=str(start_idx + idx),
-                                question_text=TRANS_SUBTYPE[target_subtype],
+                                question_text=trans_subtype[target_subtype],
                                 doc_tokens=doc_tokens,
                                 orig_answer_text=orig_answer_text,
                                 op_answer_text='',
@@ -428,7 +424,7 @@ def read_ecom_polar_examples(input_file, is_training, subtype, start_idx = 0):
                 else:
                     example = SquadExample(
                         qas_id=str(start_idx + idx),
-                        question_text=TRANS_SUBTYPE[target_subtype],
+                        question_text=trans_subtype[target_subtype],
                         doc_tokens=doc_tokens,  # 分词的结果
                         orig_answer_text='',  # 原始答案
                         op_answer_text='',
@@ -450,7 +446,7 @@ def read_ecom_polar_examples(input_file, is_training, subtype, start_idx = 0):
             # 如果所有 opinion 都 scan 一遍还是找不到, 那就是一个不可回答的问题
             example = SquadExample(
                 qas_id=str(start_idx + idx),
-                question_text=TRANS_SUBTYPE[target_subtype],
+                question_text=trans_subtype[target_subtype],
                 doc_tokens=doc_tokens,  # 分词的结果
                 orig_answer_text='',  # 原始答案
                 op_answer_text='',
@@ -476,7 +472,7 @@ def convert_polar_examples_to_features(examples, label_list, max_seq_length,
                                  cls_token='[CLS]', sep_token='[SEP]', pad_token=0,
                                  sequence_a_segment_id=0, sequence_b_segment_id=1,
                                  cls_token_segment_id=1, pad_token_segment_id=0,
-                                 mask_padding_with_zero=True):
+                                 mask_padding_with_zero=True, trans_subtype=None):
     """ Loads a data file into a list of `InputBatch`s
         `cls_token_at_end` define the location of the CLS token:
             - False (Default, BERT/XLM pattern): [CLS] + A + [SEP] + B + [SEP]
@@ -487,7 +483,7 @@ def convert_polar_examples_to_features(examples, label_list, max_seq_length,
     label_map = {label: i for i, label in enumerate(label_list)}
 
     features = []
-    question_ids = list(TRANS_SUBTYPE.keys())
+    question_ids = list(trans_subtype.keys())
     for (ex_index, example) in enumerate(examples):
         if ex_index % 10000 == 0:
             logger.info("Writing example %d of %d" % (ex_index, len(examples)))
@@ -560,8 +556,14 @@ def convert_polar_examples_to_features(examples, label_list, max_seq_length,
         assert len(input_mask) == max_seq_length
         assert len(segment_ids) == max_seq_length
 
+        # 生成opinion_mask
         opinion_mask = [0] * max_seq_length
-        op_start, op_end = find_positions(example.text_b, [example.text_a])
+        try:
+            op_start, op_end = find_positions(example.text_b, [example.text_a])
+        except Exception as e:
+            print('polar feature err', e)
+            print(example.text_b, example.text_a)
+            continue
 
         if op_start == -2 or op_start > max_seq_length - 5:
             opinion_mask[0] = 1
@@ -597,7 +599,7 @@ def convert_examples_to_features(examples, tokenizer, max_seq_length,
                                  cls_token='[CLS]', sep_token='[SEP]', pad_token=0,
                                  sequence_a_segment_id=0, sequence_b_segment_id=1,
                                  cls_token_segment_id=0, pad_token_segment_id=0,
-                                 mask_padding_with_zero=True, label_list=None):
+                                 mask_padding_with_zero=True, label_list=None, trans_subtype=None):
     """Loads a data file into a list of `InputBatch`s."""
 
     unique_id = 1000000000
@@ -607,7 +609,7 @@ def convert_examples_to_features(examples, tokenizer, max_seq_length,
     label_map = {label: i for i, label in enumerate(label_list)}
 
     features = []
-    question_ids = list(TRANS_SUBTYPE.values())
+    question_ids = list(trans_subtype.values())
     for (example_index, example) in enumerate(examples):
         # 这里question_id 标识当前example所属的subtype类型决定了最终train模型输出层选择哪一个网络
         question_id = question_ids.index(example.question_text)

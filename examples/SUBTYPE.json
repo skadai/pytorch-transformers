@@ -34,5 +34,8 @@
      "Moisturization": "保湿",
      "Smell": "气味",
       "Whitening": "肤色改善"
+  },
+   "smell": {
+     "Smell": "气味"
   }
 }

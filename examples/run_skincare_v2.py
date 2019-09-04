@@ -22,8 +22,12 @@ import logging
 import os
 import random
 import glob
+import json
 
 import numpy as np
+import pandas as pd
+import mlflow
+
 import torch
 from torch.utils.data import (DataLoader, RandomSampler, SequentialSampler,
                               TensorDataset)
@@ -47,7 +51,7 @@ from pytorch_transformers import AdamW, WarmupLinearSchedule
 from utils_glue import processors, compute_metrics
 from utils_skincare_v2 import (convert_examples_to_features,
                                      RawResult, write_predictions, read_ecom_examples, convert_polar_examples_to_features,
-                                     RawResultExtended, write_predictions_extended, acc_and_f1, TRANS_SUBTYPE)
+                                     RawResultExtended, write_predictions_extended, acc_and_f1)
 
 # The follwing import is the official SQuAD evaluation script (2.0).
 # You can remove it from the dependencies if you are using this script outside of the library
@@ -121,7 +125,9 @@ def train(args, train_dataset_dict, model, tokenizer, num_tasks):
     sum_batch = 0
     batch_counter = {}
     for idx, train_dataset in train_dataset_dict.items():
-        train_sampler = RandomSampler(train_dataset) if args.local_rank == -1 else DistributedSampler(train_dataset)
+        # 若只取训练集的一定百分比, 通过修改random_sampler 参数num_samples实现
+        num_samples = int(len(train_dataset) * args.train_sample_ratio)
+        train_sampler = RandomSampler(train_dataset, replacement=True, num_samples=num_samples) if args.local_rank == -1 else DistributedSampler(train_dataset)
         train_dataloader = DataLoader(train_dataset, sampler=train_sampler, batch_size=args.train_batch_size)
         train_dataloaders[idx] = train_dataloader
         batch_counter[idx] = len(train_dataloader)
@@ -181,102 +187,117 @@ def train(args, train_dataset_dict, model, tokenizer, num_tasks):
     train_iterator = trange(int(args.num_train_epochs), desc="Epoch", disable=args.local_rank not in [-1, 0])
     set_seed(args)  # Added here for reproductibility (even between python 2 and 3)
     loss_avg = RunningAverage()
-    for _ in train_iterator:
+    with mlflow.start_run():
+        # log training params and run name
+        mlflow.log_param('max_seq_length', args.max_seq_length)
+        mlflow.log_param('num_train_epochs', args.num_train_epochs)
+        mlflow.log_param('per_gpu_train_batch_size', args.per_gpu_train_batch_size)
+        mlflow.log_param('learning_rate', args.learning_rate)
+        mlflow.set_tag('mlflow.runName', args.runs_name)
+        mlflow.set_tag('output_dir', args.output_dir)
 
-        epoch_iterator = tqdm(range(sum_batch), desc="Iteration", disable=args.local_rank not in [-1, 0])
-        load_counter = batch_counter.copy()
-        print('load counter is', load_counter)
-        train_dataloader_iters = {}
-        for k, v in train_dataloaders.items():
-            train_dataloader_iters[k] = iter(v)
+        for _ in train_iterator:
 
-        for step in epoch_iterator:
-            # 从不同的数据集中交替取batch 直到某个数据集完结
-            batch, pick_key = fetch_batch(train_dataloader_iters, load_counter)
-            model.train()
-            batch = tuple(t.to(args.device) for t in batch)
-            # 此处需要根据极性/特征 区分batch
-            if pick_key < num_tasks:
-                # 特征/情感词发现的训练batch
-                inputs = {'input_ids':       batch[0],
-                          'attention_mask':  batch[1],
-                          'token_type_ids':  None if args.model_type == 'xlm' else batch[2],
-                          'start_positions': batch[3],
-                          'end_positions':   batch[4],
-                          'op_start_positions': batch[5],
-                          'op_end_positions': batch[6],
-                          # 'polar_start_positions': batch[7],
-                          # 'polar_end_positions': batch[8],
-                          'question_ids': batch[9],
-                          'labels': batch[10],
-                          'kw_ids': batch[11]}
-                          # 'polar_start_weights': polar_start_weights,
-                          # 'polar_end_weights': polar_end_weights}
-            else:
-                # 情感极性的训练batch
-                inputs = {'input_ids':       batch[0],
-                          'attention_mask':  batch[1],
-                          'token_type_ids':  None if args.model_type == 'xlm' else batch[2],
-                          'labels': batch[3],
-                          'question_ids': batch[4],
-                          'kw_ids': batch[5],
-                          'opinion_mask': batch[6]
-                          }
-            if args.model_type in ['xlnet', 'xlm']:
-                inputs.update({'cls_index': batch[5],
-                               'p_mask':    batch[6]})
-            outputs = model(**inputs)
-            loss = outputs[0]  # model outputs are always tuple in pytorch-transformers (see doc)
+            epoch_iterator = tqdm(range(sum_batch), desc="Iteration", disable=args.local_rank not in [-1, 0])
+            load_counter = batch_counter.copy()
+            print('load counter is', load_counter)
+            train_dataloader_iters = {}
+            for k, v in train_dataloaders.items():
+                train_dataloader_iters[k] = iter(v)
 
-            if args.n_gpu > 1:
-                loss = loss.mean() # mean() to average on multi-gpu parallel (not distributed) training
-            if args.gradient_accumulation_steps > 1:
-                loss = loss / args.gradient_accumulation_steps
+            for step in epoch_iterator:
+                # 从不同的数据集中交替取batch 直到某个数据集完结
+                batch, pick_key = fetch_batch(train_dataloader_iters, load_counter)
+                model.train()
+                batch = tuple(t.to(args.device) for t in batch)
+                # 此处需要根据极性/特征 区分batch
+                if pick_key < num_tasks:
+                    # 特征/情感词发现的训练batch
+                    inputs = {'input_ids': batch[0],
+                              'attention_mask': batch[1],
+                              'token_type_ids': None if args.model_type == 'xlm' else batch[2],
+                              'start_positions': batch[3],
+                              'end_positions': batch[4],
+                              'op_start_positions': batch[5],
+                              'op_end_positions': batch[6],
+                              # 'polar_start_positions': batch[7],
+                              # 'polar_end_positions': batch[8],
+                              'question_ids': batch[9],
+                              'labels': batch[10],
+                              'kw_ids': batch[11]}
+                    # 'polar_start_weights': polar_start_weights,
+                    # 'polar_end_weights': polar_end_weights}
+                else:
+                    # 情感极性的训练batch
+                    inputs = {'input_ids': batch[0],
+                              'attention_mask': batch[1],
+                              'token_type_ids': None if args.model_type == 'xlm' else batch[2],
+                              'labels': batch[3],
+                              'question_ids': batch[4],
+                              'kw_ids': batch[5],
+                              'opinion_mask': batch[6]
+                              }
+                if args.model_type in ['xlnet', 'xlm']:
+                    inputs.update({'cls_index': batch[5],
+                                   'p_mask': batch[6]})
+                outputs = model(**inputs)
+                loss = outputs[0]  # model outputs are always tuple in pytorch-transformers (see doc)
 
-            if args.fp16:
-                with amp.scale_loss(loss, optimizer) as scaled_loss:
-                    scaled_loss.backward()
-                torch.nn.utils.clip_grad_norm_(amp.master_params(optimizer), args.max_grad_norm)
-            else:
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
+                if args.n_gpu > 1:
+                    loss = loss.mean()  # mean() to average on multi-gpu parallel (not distributed) training
+                if args.gradient_accumulation_steps > 1:
+                    loss = loss / args.gradient_accumulation_steps
 
-            tr_loss += loss.item()
-            loss_avg.update(loss.item())
-            epoch_iterator.set_postfix(loss='{:05.3f}'.format(loss_avg()))
+                if args.fp16:
+                    with amp.scale_loss(loss, optimizer) as scaled_loss:
+                        scaled_loss.backward()
+                    torch.nn.utils.clip_grad_norm_(amp.master_params(optimizer), args.max_grad_norm)
+                else:
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
 
-            if (step + 1) % args.gradient_accumulation_steps == 0:
-                scheduler.step()  # Update learning rate schedule
-                optimizer.step()
-                model.zero_grad()
-                global_step += 1
+                tr_loss += loss.item()
+                loss_avg.update(loss.item())
+                epoch_iterator.set_postfix(loss='{:05.3f}'.format(loss_avg()))
 
-                if args.local_rank in [-1, 0] and args.logging_steps > 0 and global_step % args.logging_steps == 0:
-                    # Log metrics
-                    if args.local_rank == -1 and args.evaluate_during_training:  # Only evaluate when single GPU otherwise metrics may not average well
-                        results = evaluate(args, model, tokenizer)
-                        for key, value in results.items():
-                            tb_writer.add_scalar('eval_{}'.format(key), value, global_step)
-                    tb_writer.add_scalar('lr', scheduler.get_lr()[0], global_step)
-                    tb_writer.add_scalar('loss', (tr_loss - logging_loss)/args.logging_steps, global_step)
-                    logging_loss = tr_loss
+                if (step + 1) % args.gradient_accumulation_steps == 0:
+                    scheduler.step()  # Update learning rate schedule
+                    optimizer.step()
+                    model.zero_grad()
+                    global_step += 1
 
-                if args.local_rank in [-1, 0] and args.save_steps > 0 and global_step % args.save_steps == 0:
-                    # Save model checkpoint
-                    output_dir = os.path.join(args.output_dir, 'checkpoint-{}'.format(global_step))
-                    if not os.path.exists(output_dir):
-                        os.makedirs(output_dir)
-                    model_to_save = model.module if hasattr(model, 'module') else model  # Take care of distributed/parallel training
-                    model_to_save.save_pretrained(output_dir)
-                    torch.save(args, os.path.join(output_dir, 'training_args.bin'))
-                    logger.info("Saving model checkpoint to %s", output_dir)
+                    if args.local_rank in [-1, 0] and args.logging_steps > 0 and global_step % args.logging_steps == 0:
+                        # Log metrics
+                        if args.local_rank == -1 and args.evaluate_during_training:  # Only evaluate when single GPU otherwise metrics may not average well
+                            results = evaluate(args, model, tokenizer)
+                            for key, value in results.items():
+                                tb_writer.add_scalar('eval_{}'.format(key), value, global_step)
+                        tb_writer.add_scalar('lr', scheduler.get_lr()[0], global_step)
+                        tb_writer.add_scalar('loss', (tr_loss - logging_loss) / args.logging_steps, global_step)
+                        logging_loss = tr_loss
 
+                    if args.local_rank in [-1, 0] and args.save_steps > 0 and global_step % args.save_steps == 0:
+                        # Save model checkpoint
+                        output_dir = os.path.join(args.output_dir, 'checkpoint-{}'.format(global_step))
+                        if not os.path.exists(output_dir):
+                            os.makedirs(output_dir)
+                        model_to_save = model.module if hasattr(model,
+                                                                'module') else model  # Take care of distributed/parallel training
+                        model_to_save.save_pretrained(output_dir)
+                        torch.save(args, os.path.join(output_dir, 'training_args.bin'))
+                        logger.info("Saving model checkpoint to %s", output_dir)
+                        logger.info("writer loss to mlflow")
+                        mlflow.log_metric('training_loss', tr_loss/global_step, step=global_step)
+
+                if args.max_steps > 0 and global_step > args.max_steps:
+                    epoch_iterator.close()
+                    break
             if args.max_steps > 0 and global_step > args.max_steps:
-                epoch_iterator.close()
+                train_iterator.close()
                 break
-        if args.max_steps > 0 and global_step > args.max_steps:
-            train_iterator.close()
-            break
+
+        mlflow.log_metric('training_loss', tr_loss / global_step, step=global_step)
+
 
     if args.local_rank in [-1, 0]:
         tb_writer.export_scalars_to_json(os.path.join(args.output_dir, 'all_scalars.json'))
@@ -285,14 +306,15 @@ def train(args, train_dataset_dict, model, tokenizer, num_tasks):
     return global_step, tr_loss / global_step
 
 
-def evaluate_polar(args, model, tokenizer, prefix="",label_list=["1", "3", "5"], num_tasks=6):
+def evaluate_polar(args, model, tokenizer, prefix="",label_list=["1", "3", "5"], num_tasks=6, trans_subtype=None):
     # Loop to handle MNLI double evaluation (matched, mis-matched)
     eval_task_names = ('ecom', )
     eval_outputs_dirs = (args.output_dir,)
 
     results = {}
     for eval_task, eval_output_dir in zip(eval_task_names, eval_outputs_dirs):
-        eval_dataset = load_and_cache_polar_examples(args, eval_task, tokenizer, evaluate=True, label_list=label_list, num_tasks=num_tasks)
+        eval_dataset = load_and_cache_polar_examples(args, eval_task, tokenizer, evaluate=True, label_list=label_list, num_tasks=num_tasks,
+                                                     trans_subtype=trans_subtype)
 
         if not os.path.exists(eval_output_dir) and args.local_rank in [-1, 0]:
             os.makedirs(eval_output_dir)
@@ -358,11 +380,12 @@ def evaluate_polar(args, model, tokenizer, prefix="",label_list=["1", "3", "5"],
 
 
 
-def evaluate(args, model, tokenizer, prefix=""):
+def evaluate(args, model, tokenizer, prefix="", trans_subtype=None):
     dataset, examples, features = load_and_cache_examples(args,
                                                           tokenizer,
                                                           evaluate=True,
-                                                          output_examples=True)
+                                                          output_examples=True,
+                                                          trans_subtype=trans_subtype)
 
     if not os.path.exists(args.output_dir) and args.local_rank in [-1, 0]:
         os.makedirs(args.output_dir)
@@ -474,10 +497,10 @@ def evaluate(args, model, tokenizer, prefix=""):
     # return results
 
 
-def load_and_cache_polar_examples(args, task, tokenizer, evaluate=False, label_list=None, num_tasks=None):
+def load_and_cache_polar_examples(args, task, tokenizer, evaluate=False, label_list=None, num_tasks=None, trans_subtype=None):
     # 生成subtype id列表
     subtype_ids = {}
-    for k, m in enumerate(TRANS_SUBTYPE.values()):
+    for k, m in enumerate(trans_subtype.values()):
         m = tokenizer.tokenize(m)
         subtype_ids[k] = tokenizer.convert_tokens_to_ids(m)
 
@@ -492,7 +515,7 @@ def load_and_cache_polar_examples(args, task, tokenizer, evaluate=False, label_l
     dirlist = os.listdir(args.multi_subtype_dir) if not evaluate else [args.ecom_subtype]
     for dirname in dirlist:
         subtype = dirname.replace('.', '/').replace('_', ' ')
-        if subtype not in TRANS_SUBTYPE:
+        if subtype not in trans_subtype:
             continue
         # Load data features from cache or dataset file
         input_dir = os.path.join(args.multi_subtype_dir, dirname)
@@ -514,7 +537,8 @@ def load_and_cache_polar_examples(args, task, tokenizer, evaluate=False, label_l
                 sep_token=tokenizer.sep_token,
                 cls_token_segment_id=2 if args.model_type in ['xlnet'] else 0,
                 pad_on_left=bool(args.model_type in ['xlnet']),                 # pad on the left for xlnet
-                pad_token_segment_id=4 if args.model_type in ['xlnet'] else 0)
+                pad_token_segment_id=4 if args.model_type in ['xlnet'] else 0,
+                trans_subtype=trans_subtype)
             if args.local_rank in [-1, 0]:
                 logger.info("Saving features into cached file %s", cached_features_file)
                 torch.save(features, cached_features_file)
@@ -528,7 +552,7 @@ def load_and_cache_polar_examples(args, task, tokenizer, evaluate=False, label_l
         all_segment_ids = torch.tensor([f.segment_ids for f in features], dtype=torch.long)
         all_question_ids = torch.tensor([f.question_id for f in features], dtype=torch.long)
         all_label_ids = torch.tensor([f.label_id for f in features], dtype=torch.long)
-        all_subtype_ids = torch.tensor([subtype_ids[f.question_id % len(TRANS_SUBTYPE)] for f in features], dtype=torch.long)
+        all_subtype_ids = torch.tensor([subtype_ids[f.question_id % len(trans_subtype)] for f in features], dtype=torch.long)
         all_opinion_mask = torch.tensor([f.opinion_mask for f in features], dtype=torch.float32)
 
         dataset = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_label_ids, all_question_ids, all_subtype_ids, all_opinion_mask)
@@ -539,10 +563,10 @@ def load_and_cache_polar_examples(args, task, tokenizer, evaluate=False, label_l
         return dataset_dict
 
 
-def load_and_cache_examples(args, tokenizer, evaluate=False, output_examples=False):
+def load_and_cache_examples(args, tokenizer, evaluate=False, output_examples=False, trans_subtype=None):
     # 生成subtype id列表
     subtype_ids = {}
-    for k, m in enumerate(TRANS_SUBTYPE.values()):
+    for k, m in enumerate(trans_subtype.values()):
         m = tokenizer.tokenize(m)
         subtype_ids[k] = tokenizer.convert_tokens_to_ids(m)
 
@@ -554,7 +578,7 @@ def load_and_cache_examples(args, tokenizer, evaluate=False, output_examples=Fal
     dirlist = os.listdir(args.multi_subtype_dir) if not evaluate else [args.ecom_subtype]
     for dirname in dirlist:
         subtype = dirname.replace('.','/').replace('_',' ')
-        if subtype not in TRANS_SUBTYPE:
+        if subtype not in trans_subtype:
             continue
         filename = 'dev.json' if evaluate else 'train.json'
         input_file = os.path.join(args.multi_subtype_dir, dirname, filename)
@@ -571,14 +595,16 @@ def load_and_cache_examples(args, tokenizer, evaluate=False, output_examples=Fal
             logger.info("Creating features from dataset file at %s", input_file)
             examples = read_ecom_examples(input_file=input_file,
                                           is_training=not evaluate,
-                                          subtype=dirname)
+                                          subtype=dirname,
+                                          trans_subtype=trans_subtype)
             features = convert_examples_to_features(examples=examples,
                                                     tokenizer=tokenizer,
                                                     max_seq_length=args.max_seq_length,
                                                     doc_stride=args.doc_stride,
                                                     max_query_length=args.max_query_length,
                                                     is_training=not evaluate,
-                                                    label_list=[1, 3 ,5])
+                                                    label_list=[1, 3 ,5],
+                                                    trans_subtype=trans_subtype)
             if args.local_rank in [-1, 0]:
                 logger.info("Saving features into cached file %s", cached_features_file)
                 torch.save(features, cached_features_file)
@@ -594,7 +620,7 @@ def load_and_cache_examples(args, tokenizer, evaluate=False, output_examples=Fal
         all_p_mask = torch.tensor([f.p_mask for f in features], dtype=torch.float)
         all_question_ids = torch.tensor([f.question_id for f in features], dtype=torch.long)
         all_labels = torch.tensor([f.label for f in features], dtype=torch.long)
-        all_subtype_ids = torch.tensor([subtype_ids[f.question_id % len(TRANS_SUBTYPE)] for f in features], dtype=torch.long)
+        all_subtype_ids = torch.tensor([subtype_ids[f.question_id % len(trans_subtype)] for f in features], dtype=torch.long)
 
         if evaluate:
             all_example_index = torch.arange(all_input_ids.size(0), dtype=torch.long)
@@ -648,6 +674,11 @@ def main():
                         help="data dir, set to train multi-subtype simultaneously." )
     parser.add_argument("--polar", action='store_true',
                         help="eval polar")
+
+    parser.add_argument("--train_sample_ratio", type=float, default=1.0, help="train sample ratio")
+    parser.add_argument("--subtype_dict", type=str, required=True, help="subtype dict")
+    parser.add_argument("--task_name", type=str, required=True, help="task name")
+    parser.add_argument("--runs_name", type=str, required=True, help="runs name")
     parser.add_argument('--null_score_diff_threshold', type=float, default=0.0,
                         help="If null_score - best_non_null is greater than the threshold predict null.")
 
@@ -723,6 +754,14 @@ def main():
     parser.add_argument('--server_port', type=str, default='', help="Can be used for distant debugging.")
     args = parser.parse_args()
 
+    # 加载任务的subtype词典, 当有新任务需要再subtype.json文件中写入subtype中英文定义表
+    SUBTYPE_DICT = json.load(open(os.path.join(os.path.dirname(__file__), 'SUBTYPE.json'), 'r'))
+    if args.subtype_dict:
+        trans_subtype = SUBTYPE_DICT.get(args.subtype_dict, {})
+    else:
+        trans_subtype = SUBTYPE_DICT['general']
+
+
     if os.path.exists(args.output_dir) and os.listdir(args.output_dir) and args.do_train and not args.overwrite_output_dir:
         raise ValueError("Output directory ({}) already exists and is not empty. Use --overwrite_output_dir to overcome.".format(args.output_dir))
 
@@ -773,18 +812,25 @@ def main():
 
     logger.info("Training/evaluation parameters %s", args)
 
+    # 设置mlflow
+    mlflow.set_tracking_uri('http://127.0.0.1:9000')
+    mlflow.set_experiment(args.task_name)
 
     # Training
     if args.do_train:
         train_dataset_dict = {}
-        train_dataset_dict = load_and_cache_examples(args, tokenizer, evaluate=False, output_examples=False)
+        train_dataset_dict = load_and_cache_examples(args, tokenizer, evaluate=False,
+                                                     output_examples=False, trans_subtype=trans_subtype)
         train_dataset_dict.update(load_and_cache_polar_examples(args, 'ecom', tokenizer, evaluate=False,
-                                                                label_list=label_list, num_tasks=config.num_tasks))
+                                                                label_list=label_list, num_tasks=config.num_tasks,
+                                                                trans_subtype=trans_subtype))
+
         global_step, tr_loss = train(args, train_dataset_dict, model, tokenizer, config.num_tasks)
         logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
 
     # Save the trained model and the tokenizer
+    # TODO 模型评估时似乎不需要保存模型了吧
     if (args.local_rank == -1 or torch.distributed.get_rank() == 0):
         # Create output directory if needed
         if not os.path.exists(args.output_dir) and args.local_rank in [-1, 0]:
@@ -824,11 +870,16 @@ def main():
 
             # Evaluate
             if args.polar:
-                result = evaluate_polar(args, model, tokenizer, prefix=global_step, label_list=label_list, num_tasks=config.num_tasks)
+                result = evaluate_polar(args, model, tokenizer,
+                                        prefix=global_step,
+                                        label_list=label_list,
+                                        num_tasks=config.num_tasks,
+                                        trans_subtype=trans_subtype)
                 result = dict((k + ('_{}'.format(global_step) if global_step else ''), v) for k, v in result.items())
                 results.update(result)
+
             else:
-                result = evaluate(args, model, tokenizer, prefix=global_step)
+                result = evaluate(args, model, tokenizer, prefix=global_step, trans_subtype=trans_subtype)
 
     logger.info("Results: {}".format(results))
 
