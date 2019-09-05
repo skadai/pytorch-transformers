@@ -193,6 +193,7 @@ def train(args, train_dataset_dict, model, tokenizer, num_tasks):
         mlflow.log_param('num_train_epochs', args.num_train_epochs)
         mlflow.log_param('per_gpu_train_batch_size', args.per_gpu_train_batch_size)
         mlflow.log_param('learning_rate', args.learning_rate)
+        mlflow.log_param('train_sample_ratio', args.train_sample_ratio)
         mlflow.set_tag('mlflow.runName', args.runs_name)
         mlflow.set_tag('output_dir', args.output_dir)
 
@@ -813,7 +814,7 @@ def main():
     logger.info("Training/evaluation parameters %s", args)
 
     # 设置mlflow
-    mlflow.set_tracking_uri('http://127.0.0.1:9000')
+    mlflow.set_tracking_uri('http://127.0.0.1:9001')
     mlflow.set_experiment(args.task_name)
 
     # Training

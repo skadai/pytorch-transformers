@@ -10,6 +10,27 @@
 RUNS_NAME=$1
 TASK_NAME=$2
 
+if [ $# -gt 2 ]; then
+
+SUBDICT=$3
+
+else
+
+SUBDICT=general
+
+fi
+
+if [ $# -gt 3 ]; then
+
+SAMPLE_RATIO=$4
+
+else
+
+SAMPLE_RATIO=1
+
+fi
+
+
 export GLUE_DIR=/data/projects/bert_pytorch/
 export CUDA_VISIBLE_DEVICES=0
 export SQUAD_DIR=$GLUE_DIR/${TASK_NAME}/$RUNS_NAME
@@ -31,14 +52,14 @@ python ../examples/run_skincare_v2.py \
     --adam_epsilon 1e-6 \
     --max_seq_length 256 \
     --max_answer_length 20 \
-    --save_steps 100 \
+    --save_steps 600 \
     --weight_decay 0.01 \
     --doc_stride 128 \
     --output_dir $GLUE_DIR/${TASK_NAME}_out/$RUNS_NAME \
     --per_gpu_eval_batch_size=32   \
     --per_gpu_train_batch_size=16   \
-    --subtype_dict smell \
-    --train_sample_ratio 0.6 \
+    --subtype_dict ${SUBDICT} \
+    --train_sample_ratio ${SAMPLE_RATIO} \
     --runs_name ${RUNS_NAME} \
     --task_name ${TASK_NAME} \
     --version_2_with_negative \

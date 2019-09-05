@@ -16,6 +16,7 @@ python ../examples/run_skincare_v2.py \
     --config_name $GLUE_DIR/$TASK_NAME/config.json \
     --tokenizer_name  $GLUE_DIR/vocab.txt \
     --do_eval \
+    --polar \
     --do_lower_case \
     --multi_subtype_dir $GLUE_DIR/${TASK_NAME} \
     --ecom_subtype $SUBTYPE  \
@@ -35,4 +36,3 @@ python ../examples/run_skincare_v2.py \
     --task_name ${TASK_NAME} \
     --overwrite_output_dir \
     --overwrite_cache
-
