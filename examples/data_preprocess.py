@@ -60,7 +60,7 @@ def filter_irrelevant(text, keep_expression=False):
         # 是否要保留expression
         pat_kh = re.compile('(@[^ ]+)[@|  ]|『[^』]+』|「[^」]+」|#[^#]+#|<[^>]+>')
     else:
-        pat_kh = re.compile('&.{0,10};|\【[^】]+\】|\[[^\]]+\]|(@[^ ]+)[@| ]|『[^』]+』|「[^」]+」|#[^#]+#|<[^>]+>')
+        pat_kh = re.compile('&.{0,10};|\【[^】]{0,10}\】|\[[^\]]{0,10}\]|(@[^ ]+)[@| ]|『[^』]+』|「[^」]+」|#[^#]+#|<[^>]+>')
 
     patterns = [pat_http, pat_kh]
     ret = text

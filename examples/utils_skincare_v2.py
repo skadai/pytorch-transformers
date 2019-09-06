@@ -270,6 +270,8 @@ def read_ecom_examples(input_file, is_training, subtype, start_idx=0, trans_subt
                 polarity_term = polarity_term_dict[polarity]
                 if is_training:
                     start, end = find_positions(doc_tokens, aspect_terms)
+                    # 此处隐含逻辑, 如果有标注, 但是文本找不到, 其实就丢弃了, 那么实际上造成了idx不连续
+                    # 因此convert_text函数很关键
                     if start != -2:
                         opinion_terms = op['opinionTerm']
                         op_start, op_end = find_positions(doc_tokens, opinion_terms)
@@ -351,7 +353,6 @@ def read_ecom_examples(input_file, is_training, subtype, start_idx=0, trans_subt
                 label=3)
             examples.append(example)
 
-    # print(f'共读取examples {len(examples)}')
     return examples
 
 
@@ -988,7 +989,6 @@ def write_predictions(all_examples, all_features, all_results, n_best_size,
     example_index_to_features = collections.defaultdict(list)
     for feature in all_features:
         example_index_to_features[feature.example_index].append(feature)
-
     unique_id_to_result = {}
     for result in all_results:
         unique_id_to_result[result.unique_id] = result
@@ -1071,6 +1071,8 @@ def write_predictions(all_examples, all_features, all_results, n_best_size,
         for pred in prelim_predictions:
             if len(nbest) >= n_best_size:
                 break
+            # print('pred', pred.feature_index)
+            # print('features', features[0].__dict__)
             feature = features[pred.feature_index]
             if pred.start_index > 0:  # this is a non-null prediction
                 tok_tokens = feature.tokens[pred.start_index:(pred.end_index + 1)]

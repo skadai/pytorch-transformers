@@ -23,6 +23,7 @@ import os
 import random
 import glob
 import json
+from collections import defaultdict
 
 import numpy as np
 import pandas as pd
@@ -198,13 +199,13 @@ def train(args, train_dataset_dict, model, tokenizer, num_tasks):
         mlflow.set_tag('output_dir', args.output_dir)
 
         for _ in train_iterator:
-
             epoch_iterator = tqdm(range(sum_batch), desc="Iteration", disable=args.local_rank not in [-1, 0])
             load_counter = batch_counter.copy()
             print('load counter is', load_counter)
             train_dataloader_iters = {}
             for k, v in train_dataloaders.items():
                 train_dataloader_iters[k] = iter(v)
+
 
             for step in epoch_iterator:
                 # 从不同的数据集中交替取batch 直到某个数据集完结
@@ -677,7 +678,7 @@ def main():
                         help="eval polar")
 
     parser.add_argument("--train_sample_ratio", type=float, default=1.0, help="train sample ratio")
-    parser.add_argument("--subtype_dict", type=str, required=True, help="subtype dict")
+    parser.add_argument("--subtype_dict", type=str, default='general', help="subtype dict")
     parser.add_argument("--task_name", type=str, required=True, help="task name")
     parser.add_argument("--runs_name", type=str, required=True, help="runs name")
     parser.add_argument('--null_score_diff_threshold', type=float, default=0.0,
