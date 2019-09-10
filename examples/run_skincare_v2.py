@@ -287,6 +287,7 @@ def train(args, train_dataset_dict, model, tokenizer, num_tasks):
                                                                 'module') else model  # Take care of distributed/parallel training
                         model_to_save.save_pretrained(output_dir)
                         torch.save(args, os.path.join(output_dir, 'training_args.bin'))
+
                         logger.info("Saving model checkpoint to %s", output_dir)
                         logger.info("writer loss to mlflow")
                         mlflow.log_metric('training_loss', tr_loss/global_step, step=global_step)
@@ -681,6 +682,7 @@ def main():
     parser.add_argument("--subtype_dict", type=str, default='general', help="subtype dict")
     parser.add_argument("--task_name", type=str, required=True, help="task name")
     parser.add_argument("--runs_name", type=str, required=True, help="runs name")
+    parser.add_argument("--no_mlflow", type=bool, default=False, help="close mlflow")
     parser.add_argument('--null_score_diff_threshold', type=float, default=0.0,
                         help="If null_score - best_non_null is greater than the threshold predict null.")
 
@@ -820,7 +822,6 @@ def main():
 
     # Training
     if args.do_train:
-        train_dataset_dict = {}
         train_dataset_dict = load_and_cache_examples(args, tokenizer, evaluate=False,
                                                      output_examples=False, trans_subtype=trans_subtype)
         train_dataset_dict.update(load_and_cache_polar_examples(args, 'ecom', tokenizer, evaluate=False,

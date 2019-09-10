@@ -6,29 +6,31 @@
 
 import os
 
-sample_ratios = [0.3, 0.35, 0.38, 0.42, 0.46, 0.55, 0.58]
+sample_ratios = [1]
+# sample_ratios = [0.8]
 
-subtype = 'Whitening'
-subdict = subtype.lower()
+subtypes = ['Smell', 'Fat_Granule', 'Irritation', 'Whitening', 'Greasy', 'Moisturization']
 subdict = 'skincare'
-task_name = 'skincare_whiten'
+task_name = 'skincare_patch'
 
 data_dir = f'/data/projects/bert_pytorch/{task_name}_out/'
 
 
 for sample_ratio in sample_ratios:
-    raio_str = str(sample_ratio).replace('.','')
-    dirname =f'{subdict}_{raio_str}'
+    raio_str = str(sample_ratio).replace('.', '')
+    # dirname = f'{subdict}_{raio_str}'
+    dirname = 'all_in_one_ground/checkpoint-4200'
     if not os.path.exists(os.path.join(data_dir, dirname)):
         os.makedirs(os.path.join(data_dir, dirname))
-    command = f'./run_skincare_v2.sh {dirname} {task_name}  {subdict}  {sample_ratio}'
-    print(command)
-    os.system(command)
+    # command = f'./run_skincare_v2.sh {dirname} {task_name}  {subdict}  {sample_ratio}'
+    # print(command)
+    # os.system(command)
 
-    command = f'./run_skincare_v2_eval.sh  {subtype}   {task_name}  {dirname} {subdict}'
-    print(command)
-    os.system(command)
+    for subtype in subtypes:
+        command = f'./run_skincare_v2_eval.sh  {subtype}   {task_name}  {dirname} {subdict}'
+        print(command)
+        os.system(command)
 
-    command = f'./run_skincare_v2_polar_eval.sh  {subtype}   {task_name}  {dirname} {subdict}'
-    print(command)
-    os.system(command)
+        command = f'./run_skincare_v2_polar_eval.sh  {subtype}   {task_name}  {dirname} {subdict}'
+        print(command)
+        os.system(command)

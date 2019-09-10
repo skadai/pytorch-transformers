@@ -24,7 +24,11 @@ import sys
 
 
 
-from utils_skincare import read_ecom_examples, read_multi_examples, TRANS_SUBTYPE
+from utils_skincare_v2 import read_ecom_examples, read_multi_examples
+
+
+
+
 
 OPTS = None
 
@@ -35,7 +39,7 @@ def parse_args():
     parser.add_argument('--data-filename', '-d', metavar='data_filename', help='Input data JSON file.')
     parser.add_argument('--task-name', '-tn', help='task name')
     parser.add_argument('--runs_name', '-rn', help='runs name')
-
+    parser.add_argument('--subtype_dict', '-sd', type=str, default='general', help="subtype dict")
     parser.add_argument('--out-file', '-o', metavar='eval.json',
                         help='Write accuracy metrics to file (default is stdout).')
     parser.add_argument('--na-prob-file', '-n', metavar='na_prob.json',
@@ -315,7 +319,10 @@ def find_all_best_thresh(main_eval, preds, exact_raw, f1_raw, na_probs, qid_to_h
 def main():
     data_filename = OPTS.data_filename if OPTS.data_filename else OPTS.pred_dir
     subtype_en = OPTS.subtype_en if OPTS.subtype_en else data_filename
-    subtype_cn = TRANS_SUBTYPE[subtype_en.replace('.', '/').replace('_',' ')]
+    SUBTYPE_DICT = json.load(open(os.path.join(os.path.dirname(__file__), 'SUBTYPE.json'), 'r'))
+
+    trans_subtype = SUBTYPE_DICT.get(OPTS.subtype_dict, {})
+    subtype_cn = trans_subtype[subtype_en.replace('.', '/').replace('_',' ')]
     data_dir = f'/data/projects/bert_pytorch/{OPTS.task_name}'
 
     prefix = f'{OPTS.score_type}_'
@@ -327,10 +334,10 @@ def main():
     na_prob_file_path = f'{data_dir}_out/{OPTS.runs_name}/{OPTS.pred_dir}/{prefix}null_odds_.json'
     if OPTS.multi:
         flag = f'{prefix}multi'
-        dataset = read_multi_examples(data_dir, is_training=True, filename='dev.json')
+        dataset = read_multi_examples(data_dir, is_training=True, filename='dev.json', trans_subtype=trans_subtype)
     else:
         flag = f'{prefix}single'
-        dataset = read_ecom_examples(data_file_path, is_training=True, subtype=subtype_en)
+        dataset = read_ecom_examples(data_file_path, is_training=True, subtype=subtype_en, trans_subtype=trans_subtype)
 
     with open(pred_file_path) as f:
         preds = json.load(f)

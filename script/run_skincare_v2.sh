@@ -48,7 +48,7 @@ python ../examples/run_skincare_v2.py \
     --train_file $SQUAD_DIR/train.json \
     --predict_file $SQUAD_DIR/dev.json \
     --learning_rate 2e-5 \
-    --num_train_epochs 4 \
+    --num_train_epochs 5 \
     --adam_epsilon 1e-6 \
     --max_seq_length 256 \
     --max_answer_length 20 \

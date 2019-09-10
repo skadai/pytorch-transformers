@@ -2191,7 +2191,7 @@ class BertEcomCommentMultiPolarV4(BertPreTrainedModel):
         self.classifier = nn.Linear(config.hidden_size, self.num_polars)
         self.activation = nn.Tanh()
 
-        # 为每个subtype提供专门的全连接预测层
+        # each qa_output works for squad output of a single subtype
         for i in range(self.num_tasks):
             self.qa_outputs.append(nn.Linear(config.hidden_size, config.num_labels))
 
@@ -2214,34 +2214,29 @@ class BertEcomCommentMultiPolarV4(BertPreTrainedModel):
         :param head_mask:
         :param question_ids:
         :param labels:
-        :param kw_ids:  用于关键词attention用 (废弃)
         :param opinion_mask: 极性训练需要, 标记情感词在句子中所出现的位置用 batch * seq * 1
         :return:
         """
 
         question_id = question_ids[0].item()
-        #
-        # subtype_states = self.bert.embeddings(kw_ids)  # batch * seq * hidden
-        # subtype_states = torch.mean(subtype_states, dim=1, keepdim=True)  # batch * 1 * hidden
-        # print('subtype_state size', subtype_states.size())
 
         if question_id == -1:
-            ## 只为多任务预测时使用
-
-            # print('predict all subtypes...')
+            # set question_id = -1 when in model inference mode
+            # opinion_mask is used for opinion polarity prediction
             if opinion_mask is None:
+
                 outputs = self.bert(input_ids, position_ids=position_ids, token_type_ids=token_type_ids,
                                     attention_mask=attention_mask, head_mask=head_mask)
                 # outputs:
                 sequence_output = outputs[0]  # batch * seq_length * hidden_size
-                # 先预测特征词和情感词
-                w = torch.cat([i.weight for i in self.qa_outputs], dim=0)  # hidden_size * (num_labels * 26)
+
+                # predict aspect term and opinion term for every single subtype
+                w = torch.cat([i.weight for i in self.qa_outputs], dim=0)  # hidden_size * (num_labels * num_task)
                 b = torch.cat([i.bias for i in self.qa_outputs], dim=0)
-                temp = F.linear(sequence_output, w, b)  # batch * seq_length * (num_labels * 26)
+                temp = F.linear(sequence_output, w, b)  # batch * seq_length * (num_labels * num_task)
                 temps = temp.split(1, dim=-1)
-                # print('temp size', len(temps))  # (num_labels * 26) * [batch * seq * 1]
                 temps = [i.squeeze(-1) for i in temps]
-                start_logits_list = temps[0::self.num_labels]
+                start_logits_list = temps[0::self.num_labels]  # num_task * [batch * seq]
                 end_logits_list = temps[1::self.num_labels]
                 op_start_logits_list = temps[2::self.num_labels]
                 op_end_logits_list = temps[3::self.num_labels]
@@ -2251,14 +2246,14 @@ class BertEcomCommentMultiPolarV4(BertPreTrainedModel):
                         sequence_output) + outputs[2:]
 
             else:
-                # 根据opinion_mask来预测情感极性, 此时应该输入seq_embedding.
-                # print('attention_mask', attention_mask.size())
+                # use opinion mask (which indicates the start and end position of opinion term) to predict
+                # the polarity of specified subtype
                 opinion_mask.resize_(*opinion_mask.size(), 1)
                 opinion_mask = opinion_mask.repeat(1, 1, self.hidden_size)
                 temp = seq_embeddings * opinion_mask
                 opinion_states = torch.sum(temp, dim=1) / (temp != 0).sum(dim=1).float()
                 opinion_states = opinion_states.unsqueeze(1)
-                #             print('opinion_state size', opinion_states.size()) # 16 * 1 * 768
+
                 # opinion_states = torch.mean(sequence_output * opinion_mask, dim=1, keepdim=True)  # batch * 1 * hidden
                 kw_attention = self.kw_attention(opinion_states, seq_embeddings, attention_mask)[0]  # batch * 1 * hidden
                 kw_attention = kw_attention.squeeze(-2)
@@ -2315,7 +2310,8 @@ class BertEcomCommentMultiPolarV4(BertPreTrainedModel):
             opinion_mask.resize_(*opinion_mask.size(), 1)
             opinion_mask = opinion_mask.repeat(1, 1, self.hidden_size)
             temp = sequence_output * opinion_mask
-            # print('seq out size', sequence_output.size())
+
+            # opinion_states is the average of opinion term sequence output
             opinion_states = torch.sum(temp, dim=1) / (temp != 0).sum(dim=1).float()
             opinion_states = opinion_states.unsqueeze(1)
 #             print('opinion_state size', opinion_states.size()) # 16 * 1 * 768

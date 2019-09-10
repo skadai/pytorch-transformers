@@ -34,5 +34,3 @@ python ../examples/run_skincare_v2.py \
     --runs_name ${SUBTYPE} \
     --task_name ${TASK_NAME} \
     --overwrite_output_dir \
-    --overwrite_cache
-

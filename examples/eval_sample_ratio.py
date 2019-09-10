@@ -32,7 +32,7 @@ polarity_map = {
 }
 
 
-def eval_aspect_result(runs_name, experiment_name=None, ckpt_suffix=None, data_path=None, write_mlflow=False, trans_subtype=None):
+def eval_aspect_result(runs_name, experiment_name=None, ckpt_suffix=None, data_path=None, write_mlflow=False, trans_subtype=None, subdict=None):
     if ckpt_suffix is not None:
         run_name = f'{runs_name}-{ckpt_suffix}'  # 有时需要加上checkpoint后缀
     else:
@@ -48,10 +48,10 @@ def eval_aspect_result(runs_name, experiment_name=None, ckpt_suffix=None, data_p
         if subtype in trans_subtype:
             try:
                 print(f'try to assess {subtype}')
-                command = f"python evaluate_ecom_asop.py -st aspect -rn {run_name} -tn {experiment_name} {filename} |tail -n 15 > tmp.json "
+                command = f"python evaluate_ecom_asop.py -st aspect -sd {subdict} -rn {run_name} -tn {experiment_name} {filename} |tail -n 15 > tmp.json "
                 os.system(command)
                 ret[subtype] = json.load(open('tmp.json'))
-                command = f"python evaluate_ecom_asop.py -st op -rn {run_name} -tn {experiment_name} {filename} |tail -n 15 > tmp.json "
+                command = f"python evaluate_ecom_asop.py -st op -sd {subdict} -rn {run_name} -tn {experiment_name} {filename} |tail -n 15 > tmp.json "
                 os.system(command)
                 ret_op[subtype] = json.load(open('tmp.json'))
             #             temp = !python evaluate_ecom_asop.py -st polar  -rn {run_name} -tn {experiment_name} -pl {filename} |tail -n 15
@@ -146,19 +146,20 @@ def write_polar_to_mlflow(f1_pos, f1_neg, experiment_name, runs_name):
 if __name__ == '__main__':
     SUBTYPE_DICT = json.load(open(os.path.join(os.path.dirname(__file__), 'SUBTYPE.json'), 'r'))
 
-    experiment_name = 'skincare_whiten'
+    experiment_name = 'skincare_patch'
     data_path = f'/data/projects/bert_pytorch/{experiment_name}'
 
     subdict = 'skincare'
     trans_subtype = SUBTYPE_DICT[subdict]
 
-    sample_ratios = [0.2, 0.4, 0.5,0.6,0.7,0.8,0.9]
+    sample_ratios = [1]
 
     for sample_ratio in sample_ratios:
 
         raio_str = str(sample_ratio).replace('.', '')
         runs_name = f'{subdict}_{raio_str}'
+        runs_name = 'all_in_one_ground'
         print('write eval result:', runs_name)
-        r1 = eval_aspect_result(runs_name, data_path=data_path, experiment_name=experiment_name, write_mlflow=True, trans_subtype=trans_subtype)
+        r1 = eval_aspect_result(runs_name, data_path=data_path, experiment_name=experiment_name, write_mlflow=True, trans_subtype=trans_subtype, subdict=subdict)
         r2 = eval_polar_result(runs_name, experiment_name=experiment_name, write_mlflow=True, trans_subtype=trans_subtype)
 
