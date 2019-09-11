@@ -5,22 +5,22 @@ import torch
 from typing import List
 
 import os
+import json
 from collections import defaultdict
 
 import numpy as np
-from pytorch_transformers import *
+from service_streamer import ManagedModel
+from pytorch_transformers import BertConfig, BertTokenizer, BertEcomCommentMultiPolarV4
 
 
 from data_preprocess import convert_text
-from utils_skincare import TRANS_SUBTYPE
-from utils_skincare_v2 import (
+from utils_ecom_senti import (
     RawResult,
     SquadExample,
     convert_examples_to_features,
     convert_polar_examples_to_features, find_positions
 )
 from mtl_manual import write_predictions
-from service_streamer import ManagedModel
 
 
 logging.basicConfig(level=logging.ERROR)
@@ -34,23 +34,14 @@ def to_list(tensor):
     return tensor.detach().cpu().tolist()
 
 
-subtype_list = list(TRANS_SUBTYPE.keys())
-
-
-def find_subtype(idx):
-    return subtype_list[idx]
-
-
 class EcomSentiModel(object):
-    def __init__(self, max_sent_len=256, model_path=None, target_device='cpu'):
+    def __init__(self, max_sent_len=256, model_path=None, target_device='cpu', subtype_dict='general'):
         self.model_path = model_path
         self.tokenizer = BertTokenizer.from_pretrained(os.path.join(self.model_path, 'vocab.txt'))
         config = BertConfig.from_pretrained(os.path.join(self.model_path, 'config.json'))
-        print('file config exist', os.path.isfile(os.path.join(self.model_path, 'config.json')))
-        print(config.__dict__)
+        print('model config is', config.__dict__)
         self.bert = BertEcomCommentMultiPolarV4.from_pretrained(os.path.join(self.model_path, 'pytorch_model.bin'),
                                                                config=config)
-
         self.bert.eval()
         self.target_device = target_device
         self.bert.to(self.target_device)
@@ -59,9 +50,14 @@ class EcomSentiModel(object):
             '1': 3,
             '2': 5
         }
+        self.trans_subtype = json.load(open(os.path.join(os.path.dirname(__file__), 'SUBTYPE.json')))[subtype_dict]
+        self.subtype_list = list(self.trans_subtype)
         self.doc_stride = 128
         self.max_query_length = 20
         self.max_sent_len = max_sent_len
+
+    def _find_subtype(self, idx):
+        return self.subtype_list[idx]
 
     def _calc_polar(self, text, opinions, inputs, seq_outputs):
 
@@ -69,13 +65,12 @@ class EcomSentiModel(object):
         # generate opinion_mask
         for r in opinions:
             opinion_mask = [0] * self.max_sent_len
-            # print(text)
-            # print(r['opinionTerm'])
             op_start, op_end = find_positions(text, [r['opinionTerm']])
             if op_start == -2 or op_start > self.max_sent_len - 5:
                 opinion_mask[0] = 1
             else:
                 for i in range(op_start, op_end):
+                    # 跳过 'CLS' '维' '度' 'SEP' 共4个TOKEN
                     opinion_mask[min(i + 4, self.max_sent_len - 1)] = 1
             opinion_masks.append(opinion_mask)
 
@@ -91,7 +86,6 @@ class EcomSentiModel(object):
             outputs = self.bert(**inputs)
         return np.argmax(outputs.detach().cpu().numpy(), axis=1).tolist()
 
-
     def predict(self, batch: List[dict]) -> List[dict]:
         # extract features
         examples = []
@@ -105,7 +99,7 @@ class EcomSentiModel(object):
             batch_outputs.append(dict(text=text, opinions=[]))
             example = SquadExample(
                 qas_id=idx,
-                question_text=list(TRANS_SUBTYPE.values())[0],
+                question_text=list(self.trans_subtype.values())[0],
                 doc_tokens=text,
                 label=1
             )
@@ -123,16 +117,12 @@ class EcomSentiModel(object):
                                                     max_query_length=self.max_query_length,
                                                     is_training=False,
                                                     label_list=list(self.label_map.values()),
-                                                    trans_subtype=TRANS_SUBTYPE)
+                                                    trans_subtype=self.trans_subtype)
 
-            all_input_ids = torch.tensor([f.input_ids for f in features], dtype=torch.long).to(
-                torch.device(self.target_device))
-            all_input_mask = torch.tensor([f.input_mask for f in features], dtype=torch.long).to(
-                torch.device(self.target_device))
-            all_segment_ids = torch.tensor([f.segment_ids for f in features], dtype=torch.long).to(
-                torch.device(self.target_device))
-            all_question_ids = torch.tensor([-1] * len(features), dtype=torch.long).to(
-                torch.device(self.target_device))
+            all_input_ids = torch.tensor([f.input_ids for f in features], dtype=torch.long).to(torch.device(self.target_device))
+            all_input_mask = torch.tensor([f.input_mask for f in features], dtype=torch.long).to(torch.device(self.target_device))
+            all_segment_ids = torch.tensor([f.segment_ids for f in features], dtype=torch.long).to(torch.device(self.target_device))
+            all_question_ids = torch.tensor([-1] * len(features), dtype=torch.long).to(torch.device(self.target_device))
 
             # model inference
             with torch.no_grad():
@@ -150,7 +140,7 @@ class EcomSentiModel(object):
             all_op_results = defaultdict(list)  # batch * len(subtype)
 
             for h in range(len(batch)):
-                for i in range(len(TRANS_SUBTYPE)):
+                for i in range(len(self.trans_subtype)):
                     result = RawResult(unique_id=features[h].unique_id,
                                        start_logits=to_list(outputs[0][i][h]),
                                        end_logits=to_list(outputs[1][i][h]))
@@ -162,10 +152,6 @@ class EcomSentiModel(object):
                     all_op_results[i].append(op_result)
 
             # postprocess for final opinions
-            ret = {
-                'text': text,
-                'opinions': []
-            }
             kwargs = dict(n_best_size=5,
                           max_answer_length=20,
                           do_lower_case=True,
@@ -184,12 +170,13 @@ class EcomSentiModel(object):
                     op_ret = op[h].replace(" ", "")
                     if len(asp_ret) > 1:
                         batch_outputs[h]['opinions'].append({
-                            'aspectSubtype': find_subtype(idx),
+                            'aspectSubtype': self._find_subtype(idx),
                             'aspectTerm': asp_ret,
                             'opinionTerm': op_ret,
                         })
                 idx += 1
-                if idx > len(TRANS_SUBTYPE) - 1: break  # 不接受多余的subtype结果
+                if idx > len(self.trans_subtype) - 1:
+                    break  # 不接受多余的subtype结果
 
             # 为每条text预测其情感
             for idx, example in enumerate(examples):
@@ -213,57 +200,19 @@ class EcomSentiModel(object):
         return batch_outputs
 
 
-class TextInfillingModel(object):
-    def __init__(self, max_sent_len=16):
-        self.model_path = "bert-base-uncased"
-        self.tokenizer = BertTokenizer.from_pretrained(self.model_path)
-        self.bert = BertForMaskedLM.from_pretrained(self.model_path)
-        self.bert.eval()
-        self.bert.to("cuda")
-        self.max_sent_len = max_sent_len
-
-    def predict(self, batch: List[str]) -> List[str]:
-        """predict masked word"""
-        batch_inputs = []
-        masked_indexes = []
-
-        for text in batch:
-            tokenized_text = self.tokenizer.tokenize(text)
-            if len(tokenized_text) > self.max_sent_len - 2:
-                tokenized_text = tokenized_text[: self.max_sent_len - 2]
-            tokenized_text = ['[CLS]'] + tokenized_text + ['[SEP]']
-            tokenized_text += ['[PAD]'] * (self.max_sent_len - len(tokenized_text))
-            indexed_tokens = self.tokenizer.convert_tokens_to_ids(tokenized_text)
-            batch_inputs.append(indexed_tokens)
-            masked_indexes.append(tokenized_text.index('[MASK]'))
-        tokens_tensor = torch.tensor(batch_inputs).to("cuda")
-
-        with torch.no_grad():
-            # prediction_scores: ``torch.FloatTensor`` of shape ``(batch_size, sequence_length, config.vocab_size)``
-            prediction_scores = self.bert(tokens_tensor)[0]
-
-        batch_outputs = []
-        for i in range(len(batch_inputs)):
-            predicted_index = torch.argmax(prediction_scores[i, masked_indexes[i]]).item()
-            predicted_token = self.tokenizer.convert_ids_to_tokens(predicted_index)
-            batch_outputs.append(predicted_token)
-
-        return batch_outputs
-
-
 class ManagedBertModel(ManagedModel):
 
     def init_model(self):
-        self.model = TextInfillingModel()
+        self.model = EcomSentiModel()
 
     def predict(self, batch):
         return self.model.predict(batch)
 
 
 if __name__ == "__main__":
-    batch = ["twinkle twinkle [MASK] star.",
-             "Happy birthday to [MASK].",
-             'the answer to life, the [MASK], and everything.']
-    model = TextInfillingModel()
+    batch = ["还是网上买东西实惠，宝贝收到了，我超喜欢，呵呵，服务态度也不错，很有心的店家，以后常光顾。",
+             "欧莱雅的洗面奶一直在用，挺好的，干爽不紧绷，挺好的，京东的服务也很不错，会一直回购"]
+
+    model = EcomSentiModel()
     outputs = model.predict(batch)
     print(outputs)

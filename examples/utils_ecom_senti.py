@@ -216,7 +216,7 @@ def load_dat(fpath):
 
 def read_multi_examples(data_dir, is_training=True, filename='train.json', trans_subtype=None):
     """
-    读取多个subtype的数据
+    read example from multi subtypes in turn
     :param data_dir:
     :param is_training:
     :param filename:
@@ -261,7 +261,6 @@ def read_ecom_examples(input_file, is_training, subtype, start_idx=0, trans_subt
     input_data = load_dat(input_file)
     target_subtype = subtype.replace('_', ' ').replace('.', '/')
     for idx, entry in enumerate(input_data):
-        # doc_tokens = '正面/负面/中性/' + convert_text(entry['text'])
         doc_tokens = convert_text(entry['text'])
         for op in entry['opinions']:
             if op['aspectSubtype'] == target_subtype:

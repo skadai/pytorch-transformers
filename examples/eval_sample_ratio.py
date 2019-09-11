@@ -9,30 +9,27 @@
 import os
 import pandas as pd
 import json
-import numpy as np
-import click
-
 
 import mlflow
-from  mlflow.tracking import MlflowClient
+from mlflow.tracking import MlflowClient
 
 
-
-MLFLOW_SERVER_URL = 'http://127.0.0.1:9001'
+MLFLOW_SERVER_URL = 'http://127.0.0.1:9001' # mlflow server address
 mlflow.set_tracking_uri(MLFLOW_SERVER_URL)
 client = MlflowClient()
 HOST_USER = 'ymai'
 
 
-
 polarity_map = {
-    0:1,
-    1:3,
-    2:5
+    0: 1,
+    1: 3,
+    2: 5
 }
 
 
-def eval_aspect_result(runs_name, experiment_name=None, ckpt_suffix=None, data_path=None, write_mlflow=False, trans_subtype=None, subdict=None):
+def eval_aspect_result(runs_name, experiment_name=None,
+                       ckpt_suffix=None, data_path=None,
+                       write_mlflow=False, trans_subtype=None, subdict=None):
     if ckpt_suffix is not None:
         run_name = f'{runs_name}-{ckpt_suffix}'  # 有时需要加上checkpoint后缀
     else:
@@ -40,7 +37,6 @@ def eval_aspect_result(runs_name, experiment_name=None, ckpt_suffix=None, data_p
 
     ret = {}
     ret_op = {}
-    ret_polar = {}
 
     dirlist = os.listdir(data_path)
     for filename in dirlist:
@@ -54,8 +50,6 @@ def eval_aspect_result(runs_name, experiment_name=None, ckpt_suffix=None, data_p
                 command = f"python evaluate_ecom_asop.py -st op -sd {subdict} -rn {run_name} -tn {experiment_name} {filename} |tail -n 15 > tmp.json "
                 os.system(command)
                 ret_op[subtype] = json.load(open('tmp.json'))
-            #             temp = !python evaluate_ecom_asop.py -st polar  -rn {run_name} -tn {experiment_name} -pl {filename} |tail -n 15
-            #             ret_polar[subtype] = json.loads(''.join(temp))
             except Exception as e:
                 print('err', subtype, e)
 
@@ -67,22 +61,15 @@ def eval_aspect_result(runs_name, experiment_name=None, ckpt_suffix=None, data_p
              ret[k]['NoAns_exact'], ret[k]['NoAns_f1'], ret[k]['NoAns_total'],
              ret_op[k]['exact'], ret_op[k]['f1'], ret_op[k]['total'],
              ret_op[k]['NoAns_exact'], ret_op[k]['NoAns_f1'], ret_op[k]['NoAns_total'],
-             #             ret_polar[k]['exact'], ret_polar[k]['f1'], ret_polar[k]['total'],
-             #             ret_polar[k]['NoAns_exact'], ret_polar[k]['NoAns_f1'],ret_polar[k]['NoAns_total'],
              )
         )
 
     aspect_columns = ['exact', 'f1', 'total', 'NoAns_exact', 'NoAns_f1', 'NoAns_total']
     opinions_columns = list(map(lambda x: 'op_' + x, aspect_columns))
-    polar_columns = list(map(lambda x: 'polar_' + x, aspect_columns))
 
-    # df_metric = pd.DataFrame(data, columns =['subtype'] + aspect_columns+opinions_columns+polar_columns)
     df_metric = pd.DataFrame(data, columns=['subtype'] + aspect_columns + opinions_columns)
 
     df_metric.sort_values('f1', ascending=True, inplace=True)
-    # df_metric.to_csv(os.path.join(data_path, 'metric_asop_mtl.csv'), index=False)
-    # df_metric[['subtype','exact','f1','total', 'op_exact','op_f1','op_total', 'polar_exact','polar_f1','polar_total']]
-    # df_metric[['subtype', 'exact', 'f1', 'total', 'op_exact', 'op_f1', 'op_total']]
     if write_mlflow:
         write_to_mlflow(df_metric, experiment_name, runs_name)
 
@@ -94,7 +81,6 @@ def eval_polar_result(runs_name, experiment_name=None, write_mlflow=False, trans
     polar_metric= []
 
     for dirname in os.listdir(result_dir):
-        # output_dir = os.path.join(result_dir, dirname)
         subtype = dirname.replace('.', '/').replace('_'," ")
         if subtype not in trans_subtype:
             continue

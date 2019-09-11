@@ -22,15 +22,15 @@ for sample_ratio in sample_ratios:
     dirname = 'all_in_one_ground/checkpoint-4200'
     if not os.path.exists(os.path.join(data_dir, dirname)):
         os.makedirs(os.path.join(data_dir, dirname))
-    # command = f'./run_skincare_v2.sh {dirname} {task_name}  {subdict}  {sample_ratio}'
+    # command = f'./run_ecom_senti.sh {dirname} {task_name}  {subdict}  {sample_ratio}'
     # print(command)
     # os.system(command)
 
     for subtype in subtypes:
-        command = f'./run_skincare_v2_eval.sh  {subtype}   {task_name}  {dirname} {subdict}'
+        command = f'./run_ecom_senti_eval.sh  {subtype}   {task_name}  {dirname} {subdict}'
         print(command)
         os.system(command)
 
-        command = f'./run_skincare_v2_polar_eval.sh  {subtype}   {task_name}  {dirname} {subdict}'
+        command = f'./run_ecom_senti_polar_eval.sh  {subtype}   {task_name}  {dirname} {subdict}'
         print(command)
         os.system(command)

@@ -24,9 +24,7 @@ import sys
 
 
 
-from utils_skincare_v2 import read_ecom_examples, read_multi_examples
-
-
+from utils_ecom_senti import read_ecom_examples, read_multi_examples
 
 
 
