@@ -50,7 +50,7 @@ from pytorch_transformers import AdamW, WarmupLinearSchedule
 
 
 from utils_glue import processors, compute_metrics
-from utils_skincare_v2 import (convert_examples_to_features,
+from utils_ecom_senti import (convert_examples_to_features,
                                      RawResult, write_predictions, read_ecom_examples, convert_polar_examples_to_features,
                                      RawResultExtended, write_predictions_extended, acc_and_f1)
 
@@ -66,7 +66,7 @@ ALL_MODELS = sum((tuple(conf.pretrained_config_archive_map.keys()) \
 MODEL_CLASSES = {
     'bert': (BertConfig, BertEcomCommentMultiPolar, BertTokenizer),
     'multi_v2': (BertConfig, BertEcomCommentMultiV2, BertTokenizer),
-    'multi_v3': (BertConfig, BertEcomCommentMultiPolarV4, BertTokenizer),
+    'ecom_senti': (BertConfig, BertEcomCommentMultiPolarV4, BertTokenizer),
     'xlnet': (XLNetConfig, XLNetForQuestionAnswering, XLNetTokenizer),
     'xlm': (XLMConfig, XLMForQuestionAnswering, XLMTokenizer),
 }

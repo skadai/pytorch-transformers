@@ -18,8 +18,9 @@ PID_FILE = 'ecom_senti.pid'
 def post_fork(server, worker):
     import flask_example
     model_path = '/data/projects/bert_pytorch/skincare_patch_out/all_in_one_ground/checkpoint-4200'
-    model = Model(model_path=model_path, target_device='cuda:0', subtype_dict='skincare')
+    model = Model(model_path=model_path, target_device='cpu', subtype_dict='skincare')
     flask_example.streamer = ThreadedStreamer(model.predict, batch_size=32, max_latency=0.2)
+    flask_example.model = model
 
 
 bind = '%s:%s' % ('0.0.0.0', 5005)

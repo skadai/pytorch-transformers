@@ -3,6 +3,7 @@
 # @File    : test_sample_ratio.py
 # @Date    : 2019-09-05
 # @Author  : skym
+# 用来测试训练量对模型指标的影响
 
 import os
 
@@ -22,9 +23,9 @@ for sample_ratio in sample_ratios:
     dirname = 'all_in_one_ground/checkpoint-4200'
     if not os.path.exists(os.path.join(data_dir, dirname)):
         os.makedirs(os.path.join(data_dir, dirname))
-    # command = f'./run_ecom_senti.sh {dirname} {task_name}  {subdict}  {sample_ratio}'
-    # print(command)
-    # os.system(command)
+    command = f'./run_ecom_senti.sh {dirname} {task_name}  {subdict}  {sample_ratio}'
+    print(command)
+    os.system(command)
 
     for subtype in subtypes:
         command = f'./run_ecom_senti_eval.sh  {subtype}   {task_name}  {dirname} {subdict}'

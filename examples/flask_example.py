@@ -28,7 +28,7 @@ def stream_predict():
 
 
 if __name__ == "__main__":
-    model_path = '/data/projects/bert_pytorch/skincare_op_out/all_in_one/checkpoint-4200'
+    model_path = '/data/projects/bert_pytorch/skincare_patch_out/all_in_one/checkpoint-4200'
     model = Model(model_path=model_path, target_device='cuda:0', subtype_dict='skincare')
 
     # start child thread as worker
