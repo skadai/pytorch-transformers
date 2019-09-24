@@ -188,6 +188,7 @@ def train(args, train_dataset_dict, model, tokenizer, num_tasks):
     train_iterator = trange(int(args.num_train_epochs), desc="Epoch", disable=args.local_rank not in [-1, 0])
     set_seed(args)  # Added here for reproductibility (even between python 2 and 3)
     loss_avg = RunningAverage()
+
     with mlflow.start_run():
         # log training params and run name
         mlflow.log_param('max_seq_length', args.max_seq_length)
@@ -208,7 +209,7 @@ def train(args, train_dataset_dict, model, tokenizer, num_tasks):
 
 
             for step in epoch_iterator:
-                # 从不同的数据集中交替取batch 直到某个数据集完结
+                # load fetch from different dataloaders in random util all batches have been fetched
                 batch, pick_key = fetch_batch(train_dataloader_iters, load_counter)
                 model.train()
                 batch = tuple(t.to(args.device) for t in batch)
@@ -292,15 +293,15 @@ def train(args, train_dataset_dict, model, tokenizer, num_tasks):
                         logger.info("writer loss to mlflow")
                         mlflow.log_metric('training_loss', tr_loss/global_step, step=global_step)
 
-                if args.max_steps > 0 and global_step > args.max_steps:
+                if global_step > args.max_steps > 0:
                     epoch_iterator.close()
                     break
-            if args.max_steps > 0 and global_step > args.max_steps:
+
+            if global_step > args.max_steps > 0:
                 train_iterator.close()
                 break
 
         mlflow.log_metric('training_loss', tr_loss / global_step, step=global_step)
-
 
     if args.local_rank in [-1, 0]:
         tb_writer.export_scalars_to_json(os.path.join(args.output_dir, 'all_scalars.json'))
@@ -309,7 +310,7 @@ def train(args, train_dataset_dict, model, tokenizer, num_tasks):
     return global_step, tr_loss / global_step
 
 
-def evaluate_polar(args, model, tokenizer, prefix="",label_list=["1", "3", "5"], num_tasks=6, trans_subtype=None):
+def evaluate_polar(args, model, tokenizer, prefix="", label_list=["1", "3", "5"], num_tasks=6, trans_subtype=None):
     # Loop to handle MNLI double evaluation (matched, mis-matched)
     eval_task_names = ('ecom', )
     eval_outputs_dirs = (args.output_dir,)
@@ -805,7 +806,8 @@ def main():
     args.model_type = args.model_type.lower()
     config_class, model_class, tokenizer_class = MODEL_CLASSES[args.model_type]
     config = config_class.from_pretrained(args.config_name if args.config_name else args.model_name_or_path)
-
+    config.num_tasks = len(trans_subtype)
+    print('num_tasks are', config.num_tasks)
     label_list = ["1", "3", "5"]
     tokenizer = tokenizer_class.from_pretrained(args.tokenizer_name if args.tokenizer_name else args.model_name_or_path, do_lower_case=args.do_lower_case)
     model = model_class.from_pretrained(args.model_name_or_path, from_tf=bool('.ckpt' in args.model_name_or_path), config=config)
@@ -817,7 +819,7 @@ def main():
     logger.info("Training/evaluation parameters %s", args)
 
     # 设置mlflow
-    mlflow.set_tracking_uri('http://127.0.0.1:9001')
+    mlflow.set_tracking_uri('http://127.0.0.1:9000')
     mlflow.set_experiment(args.task_name)
 
     # Training
@@ -882,7 +884,11 @@ def main():
                 results.update(result)
 
             else:
-                result = evaluate(args, model, tokenizer, prefix=global_step, trans_subtype=trans_subtype)
+                evaluate(args,
+                         model,
+                         tokenizer,
+                         prefix=global_step,
+                         trans_subtype=trans_subtype)
 
     logger.info("Results: {}".format(results))
 

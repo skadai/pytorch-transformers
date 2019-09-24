@@ -23,9 +23,7 @@ import string
 import sys
 
 
-
 from utils_ecom_senti import read_ecom_examples, read_multi_examples
-
 
 
 OPTS = None
@@ -298,7 +296,7 @@ def find_best_thresh(preds, scores, na_probs, qid_to_has_ans):
                 diff = 0
         cur_score += diff
         if cur_score > best_score:
-#             print('更新cur score', best_score, cur_score)
+            # print('更新cur score', best_score, cur_score)
             best_score = cur_score
             best_thresh = na_probs[qid]
     return 100.0 * best_score / len(scores), best_thresh
@@ -384,7 +382,6 @@ def main():
 
 if __name__ == '__main__':
     OPTS = parse_args()
-#     print('OPTS', OPTS)
     if OPTS.out_image_dir:
         import matplotlib
         matplotlib.use('Agg')

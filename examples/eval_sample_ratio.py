@@ -14,10 +14,10 @@ import mlflow
 from mlflow.tracking import MlflowClient
 
 
-MLFLOW_SERVER_URL = 'http://127.0.0.1:9001' # mlflow server address
+MLFLOW_SERVER_URL = 'http://127.0.0.1:9000' # mlflow server address
 mlflow.set_tracking_uri(MLFLOW_SERVER_URL)
 client = MlflowClient()
-HOST_USER = 'ymai'
+HOST_USER = 'aiuser'
 
 
 polarity_map = {
@@ -132,10 +132,10 @@ def write_polar_to_mlflow(f1_pos, f1_neg, experiment_name, runs_name):
 if __name__ == '__main__':
     SUBTYPE_DICT = json.load(open(os.path.join(os.path.dirname(__file__), 'SUBTYPE.json'), 'r'))
 
-    experiment_name = 'skincare_patch'
+    experiment_name = 'babycare'
     data_path = f'/data/projects/bert_pytorch/{experiment_name}'
 
-    subdict = 'skincare'
+    subdict = 'babycare'
     trans_subtype = SUBTYPE_DICT[subdict]
 
     sample_ratios = [1]
@@ -144,8 +144,15 @@ if __name__ == '__main__':
 
         raio_str = str(sample_ratio).replace('.', '')
         runs_name = f'{subdict}_{raio_str}'
-        runs_name = 'all_in_one_ground'
+        runs_name = 'all_in_one_robert'
         print('write eval result:', runs_name)
-        r1 = eval_aspect_result(runs_name, data_path=data_path, experiment_name=experiment_name, write_mlflow=True, trans_subtype=trans_subtype, subdict=subdict)
-        r2 = eval_polar_result(runs_name, experiment_name=experiment_name, write_mlflow=True, trans_subtype=trans_subtype)
-
+        r1 = eval_aspect_result(runs_name,
+                                data_path=data_path,
+                                experiment_name=experiment_name,
+                                write_mlflow=True,
+                                trans_subtype=trans_subtype,
+                                subdict=subdict)
+        r2 = eval_polar_result(runs_name,
+                               experiment_name=experiment_name,
+                               write_mlflow=True,
+                               trans_subtype=trans_subtype)

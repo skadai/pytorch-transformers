@@ -10,22 +10,25 @@ import os
 sample_ratios = [1]
 # sample_ratios = [0.8]
 
-subtypes = ['Smell', 'Fat_Granule', 'Irritation', 'Whitening', 'Greasy', 'Moisturization']
-subdict = 'skincare'
-task_name = 'skincare_patch'
+
+subdict = 'chocolate'
+task_name = 'chocolate'
 
 data_dir = f'/data/projects/bert_pytorch/{task_name}_out/'
+corpus_dir = f'/data/projects/bert_pytorch/{task_name}'
+
+subtypes = [ dirname for dirname in os.listdir(corpus_dir) if os.path.isdir(os.path.join(corpus_dir, dirname))]
 
 
 for sample_ratio in sample_ratios:
     raio_str = str(sample_ratio).replace('.', '')
     # dirname = f'{subdict}_{raio_str}'
-    dirname = 'all_in_one_ground/checkpoint-4200'
+    dirname = 'all_in_one/checkpoint-4800'
     if not os.path.exists(os.path.join(data_dir, dirname)):
         os.makedirs(os.path.join(data_dir, dirname))
-    command = f'./run_ecom_senti.sh {dirname} {task_name}  {subdict}  {sample_ratio}'
-    print(command)
-    os.system(command)
+    # command = f'./run_ecom_senti.sh {dirname} {task_name}  {subdict}  {sample_ratio}'
+    # print(command)
+    # os.system(command)
 
     for subtype in subtypes:
         command = f'./run_ecom_senti_eval.sh  {subtype}   {task_name}  {dirname} {subdict}'
